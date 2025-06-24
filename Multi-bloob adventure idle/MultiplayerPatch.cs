@@ -14,8 +14,9 @@ namespace Multi_bloob_adventure_idle
 
         private WebSocket ws;
         private bool isConnected = false;
-        //public static Vector3 startPosition;
-        //public static Vector3 desiredPosition;
+        public static Vector3 curentPosition;
+        public static Vector3 desiredPosition;
+        private Coroutine positionCoroutine;
 
         private void Awake()
         {
@@ -33,10 +34,8 @@ namespace Multi_bloob_adventure_idle
                 isConnected = false;
             Debug.Log("WebSocket Connection Closed");
             };
-            ws.ConnectAsync();
-            ////Harmony.CreateAndPatchAll(typeof(GetStartPositionPatch));
-            ////Harmony.CreateAndPatchAll(typeof(GetDesiredPositionPatch));
-            //StartCoroutine(GetPositionEnumerator());
+            ws.Connect();
+            Harmony.CreateAndPatchAll(typeof(GetDesiredPositionPatch));
 
             if (ws == null) { Debug.Log("WS NULL"); };
             Debug.Log("Fully woken up");
@@ -44,71 +43,93 @@ namespace Multi_bloob_adventure_idle
 
         private void Start()
         {
-            //StartCoroutine(GetPositionEnumerator());
+            if (positionCoroutine == null) positionCoroutine = StartCoroutine(GetPositionEnumerator());
+
         }
+
+        /*
+         * TODO
+         * If we grab the gameObject of the playerCharacter and get the gameObject.transform we get the positoin of the player character. We can cache this
+         * and on update we can see if the cache == the current gameObject.transform. If different we can then move the player character to this location.
+         *
+         *
+         * When creating custom gameObject that acts as the multiplayer ghost players, attach the playerController to said gameObject to be able to manipulate
+         * it directly using the games built in systems without messing with the live player
+         *
+         *
+         * Create dynamic ws send function so we can get live data as it updates through the hooks and data can be manually adjusted and sent, example
+         *
+         * Create BloobCharacter GameObjects named with Steam name so data can be sent back and updated on a per GameObject basis rather than foreach them all to update the correct one
+         *
+         */
+
 
         IEnumerator GetPositionEnumerator()
         {
             while (true)
             {
-                //CharacterData data = new CharacterData();
+                CharacterData data = new CharacterData();
 
-                //if (SteamClient.IsValid)
-                //{
-                //    data.name = SteamClient.Name;
-                //}
-                //if (startPosition == null || desiredPosition == null) yield break;
+                if (SteamClient.IsValid)
+                {
+                    data.name = SteamClient.Name;
+                }
+                if (curentPosition == null || desiredPosition == null) yield break;
 
-                //data.desiredPosition = desiredPosition;
-                //data.startPosition = startPosition;
+                data.desiredPosition = desiredPosition;
+                Debug.Log(desiredPosition);
+                data.curentPosition = curentPosition;
+                Debug.Log(curentPosition);
 
-                //string json = JsonConvert.SerializeObject(data);
+                object[] flat = new object[]
 
-                //ws.Send(json);
+                {
+                    data.curentPosition.x,
+                    data.curentPosition.y,
+                    data.curentPosition.z,
+                    data.name,
+                    data.desiredPosition.x,
+                    data.desiredPosition.y,
+                    data.desiredPosition.z
+                };
+
+                string json = JsonConvert.SerializeObject(flat);
+
+                ws.Send(json);
                 Debug.Log("Hey shithead");
-                yield return new WaitForSeconds(2f);
+                yield return new WaitForSeconds(30f);
             }
-
-
 
         }
 
         void OnDestroy()
         {
-            //if (ws != null && ws.IsAlive)
-            //    ws.Close();
+            if (ws != null && ws.IsAlive)
+                ws.Close();
         }
 
     }
 
-    /*public class CharacterData
+    public class CharacterData
     {
         public string name { get; set; }
 
-        public Vector3 startPosition { get; set; }
+        public Vector3 curentPosition { get; set; }
 
         public Vector3 desiredPosition { get; set; }
     }
 
-    [HarmonyPatch(typeof(CharacterMovement), nameof(CharacterMovement.GetStartPosition))]
-        public static class GetStartPositionPatch
-        {
-            [HarmonyPostfix]
-            public static void GetStartPosition(ref Vector3 __result)
-            {
-                MultiplayerPatchPlugin.startPosition = __result;
-            }
-
-        }
 
         [HarmonyPatch(typeof(CharacterMovement), nameof(CharacterMovement.MoveTo))]
         public static class GetDesiredPositionPatch
         {
             [HarmonyPostfix]
-            public static void GetDesiredPosition(ref Vector2 __result)
+            public static void GetDesiredPosition(ref Vector2 destination)
             {
-                MultiplayerPatchPlugin.desiredPosition = new Vector3(__result.x, __result.y);
+                MultiplayerPatchPlugin.desiredPosition = new Vector3(destination.x, destination.y, 0);
+                //object[] blah = new object[]{name, "desired", position}
+                //SendData(blah);
             }
-        }*/
+        }
 }
 
