@@ -15,6 +15,9 @@ namespace Multi_bloob_adventure_idle
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
 
+        private readonly Queue<string> messageQueue = new Queue<string>();
+        private readonly object queueLock = new object();
+
         private WebSocket ws;
         private bool isConnected = false;
         public static Vector3 currentPosition;
@@ -43,35 +46,12 @@ namespace Multi_bloob_adventure_idle
             };
             ws.OnMessage += (sender, e) =>
             {
-                Debug.Log("Got message from WS");
-                if (e.Data.GetType().ToString() != "allData")
-                    return;
-                Debug.Log("Got allData from WS");
-                try
+                lock (queueLock)
                 {
-                    PlayerData[] incomingData = JsonConvert.DeserializeObject<PlayerData[]>(e.Data);
-                    lock (players)
-                    {
-                        foreach (var player in incomingData)
-                        {
-                            if (players.ContainsKey(player.name))
-                            {
-                                players[player.name].desiredPosition = player.desiredPosition;
-                                players[player.name].currentPosition = player.currentPosition;
-                            }
-                            else
-                            {
-                                players[player.name] = player;
-                            }
-                        }
-                    }
-
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogError($"Failed to parse Json array: {ex}");
+                    messageQueue.Enqueue(e.Data);
                 }
             };
+
             ws.Connect();
             Harmony.CreateAndPatchAll(typeof(GetDesiredPositionPatch));
             //Harmony.CreateAndPatchAll(typeof(CharacterMovement_UpdatePatch));
@@ -91,7 +71,7 @@ namespace Multi_bloob_adventure_idle
         {
             while (true)
             {
-                Debug.Log($"Retrying dataset post: {players.Keys}\nRetrying in 10 seconds");
+                Debug.Log($"Retrying dataset post: {string.Join(", ", players.Keys)}\nRetrying in 10 seconds");
                 yield return new WaitForSeconds(10);
             }
         }
@@ -104,10 +84,37 @@ namespace Multi_bloob_adventure_idle
 
         private void Update()
         {
-            GameObject player = GameObject.Find("BloobCharacter");
-            if (player == null) return;
-            currentPosition = player.transform.position;
-        }
+                GameObject player = GameObject.Find("BloobCharacter");
+                if (player != null)
+                    currentPosition = player.transform.position;
+
+                lock (queueLock)
+                {
+                    while (messageQueue.Count > 0)
+                    {
+                        string json = messageQueue.Dequeue();
+                        Debug.Log("Got message from WS: " + json);
+                        try
+                        {
+                            var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
+                            if (message?.type == "allData" && message.data != null)
+                            {
+                                lock (players)
+                                {
+                                    foreach (var playerData in message.data)
+                                    {
+                                        players[playerData.name] = playerData;
+                                    }
+                                }
+                            }
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogError("Failed to handle WS message: " + ex);
+                        }
+                    }
+                }
+            }
 
         /*
          * TODO
@@ -218,7 +225,7 @@ namespace Multi_bloob_adventure_idle
                 data.currentPosition = currentPosition;
                 Debug.Log(currentPosition);
 
-                var playload = new
+                var payload = new
                 {
                     name = data.name,
                     currentPosition = new
@@ -235,7 +242,9 @@ namespace Multi_bloob_adventure_idle
                     }
                 };
 
-                string json = JsonConvert.SerializeObject(playload);
+                string json = JsonConvert.SerializeObject(payload);
+
+                Debug.Log($"Sending data: {json} to server");
 
                 ws.Send(json);
 
@@ -278,8 +287,17 @@ namespace Multi_bloob_adventure_idle
     public class PlayerData
     {
         public string name;
-        public string[] currentPosition;
-        public string[] desiredPosition;
+        public Vector3Like currentPosition;
+        public Vector3Like desiredPosition;
+    }
+
+    public class Vector3Like
+    {
+        public float x;
+        public float y;
+        public float z;
+
+        public Vector3 ToVector3() => new Vector3(x, y, z);
     }
 
     public class CharacterData
@@ -335,6 +353,12 @@ namespace Multi_bloob_adventure_idle
     public class IsMultiplayerClone : MonoBehaviour
     {
         public Vector3 lastTargetPosition = Vector3.positiveInfinity;
+    }
+
+    public class WebSocketMessage
+    {
+        public string type { get; set; }
+        public PlayerData[] data { get; set; }
     }
 
 
