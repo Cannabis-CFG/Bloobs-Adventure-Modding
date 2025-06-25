@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 using Steamworks;
 using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using WebSocketSharp;
 
@@ -23,6 +24,9 @@ namespace Multi_bloob_adventure_idle
         public static Vector3 currentPosition;
         public static Vector3 desiredPosition;
         private Coroutine positionCoroutine;
+        private Coroutine ghostPlayerCoroutine;
+        public static bool isReady = false;
+        private Scene lastScene;
 
         //public static Dictionary<string, Vector3> dummyPositions = new Dictionary<string, Vector3>();
         //public static Dictionary<string, Vector3> desiredPositions = new Dictionary<string, Vector3>();
@@ -41,6 +45,7 @@ namespace Multi_bloob_adventure_idle
             ws.OnError += (sender, e) => { Debug.Log("WebSocket Error:" + e.Message); };
             ws.OnClose += (sender, e) =>
             {
+                //TODO Pass through name of closing client
                 isConnected = false;
                 Debug.Log("WebSocket Connection Closed");
             };
@@ -52,9 +57,9 @@ namespace Multi_bloob_adventure_idle
                 }
             };
 
-            ws.Connect();
+            ws.ConnectAsync ();
             Harmony.CreateAndPatchAll(typeof(GetDesiredPositionPatch));
-            //Harmony.CreateAndPatchAll(typeof(CharacterMovement_UpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(CharacterMovement_UpdatePatch));
 
             if (ws == null) { Debug.Log("WS NULL"); };
             Debug.Log("Fully woken up");
@@ -62,8 +67,14 @@ namespace Multi_bloob_adventure_idle
             {
                 Debug.Log($"Have dataset: {players}");
             }
-
+            SceneManager.activeSceneChanged += OnActiveSceneChanged;
             StartCoroutine(Test());
+        }
+
+        private void OnApplicationQuit()
+        {
+            //TODO Handle closing WS
+            ws.Close();
         }
 
 
@@ -72,7 +83,7 @@ namespace Multi_bloob_adventure_idle
             while (true)
             {
                 Debug.Log($"Retrying dataset post: {string.Join(", ", players.Keys)}\nRetrying in 10 seconds");
-                yield return new WaitForSeconds(10);
+                yield return new WaitForSecondsRealtime(10);
             }
         }
 
@@ -80,10 +91,12 @@ namespace Multi_bloob_adventure_idle
         private void Start()
         {
             if (positionCoroutine == null) positionCoroutine = StartCoroutine(GetPositionEnumerator());
+            if (ghostPlayerCoroutine == null) ghostPlayerCoroutine = StartCoroutine(UpdateGhostPlayers());
         }
 
         private void Update()
         {
+            if (!isReady) return;
                 GameObject player = GameObject.Find("BloobCharacter");
                 if (player != null)
                     currentPosition = player.transform.position;
@@ -97,13 +110,17 @@ namespace Multi_bloob_adventure_idle
                         try
                         {
                             var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
+                            //TODO Switch message?.type
+                            // Add closing type to handle removing of closing clients
                             if (message?.type == "allData" && message.data != null)
                             {
                                 lock (players)
                                 {
                                     foreach (var playerData in message.data)
                                     {
+                                        if (playerData.name == SteamClient.Name) break;
                                         players[playerData.name] = playerData;
+                                        Debug.Log($"Added player {playerData.name} to cached data. Their starting position is {playerData.currentPosition.ToVector3()}");
                                     }
                                 }
                             }
@@ -114,97 +131,124 @@ namespace Multi_bloob_adventure_idle
                         }
                     }
                 }
+        }
+
+        public void OnActiveSceneChanged(Scene a, Scene b)
+        {
+            //TODO Handle cleaning up of gameObjects when exiting to main menu and recreating gameObjects re-entering back into the game
+            if (b.name == "GameCloud")
+            {
+                isReady = true;
+                lastScene = b;
+                //Debug.Log($"Scene A is {a.name} Scene B is {b.name}");
             }
 
-        /*
-         * TODO
-         * If we grab the gameObject of the playerCharacter and get the gameObject.transform we get the positoin of the player character. We can cache this
-         * and on update we can see if the cache == the current gameObject.transform. If different we can then move the player character to this location.
-         *
-         *
-         * When creating custom gameObject that acts as the multiplayer ghost players, attach the playerController to said gameObject to be able to manipulate
-         * it directly using the games built in systems without messing with the live player
-         *
-         *
-         * Create dynamic ws send function so we can get live data as it updates through the hooks and data can be manually adjusted and sent, example
-         *
-         * Create BloobCharacter GameObjects named with Steam name so data can be sent back and updated on a per GameObject basis rather than foreach them all to update the correct one
-         *
-         */
+        }
+
+
+        IEnumerator UpdateGhostPlayers()
+        {
+
+            while (true)
+            {
+                if (!isReady)
+                {
+                    Debug.Log("Game not ready, retrying ghost player update in 5 seconds");
+                    yield return new WaitForSecondsRealtime(5f);
+                }
+                //TODO Refactor to fit new data structure
+                foreach (var kvp in players)
+                {
+                    string playerName = kvp.Key;
+                    Vector3 targetPos = kvp.Value.desiredPosition.ToVector3();
+
+                    // Find or create clone for this player
+                    GameObject clone = GameObject.Find("BloobClone_" + playerName);
+                    if (clone == null)
+                    {
+                        GameObject original = GameObject.Find("BloobCharacter");
+                        if (original == null)
+                        {
+                            Debug.LogWarning("BloobCharacter not found.");
+                            continue;
+                        }
+
+                        clone = Instantiate(original);
+                        clone.name = "BloobClone_" + playerName;
+                        clone.AddComponent<IsMultiplayerClone>();
+
+                        // Remove unwanted components and children (same as your existing code)
+                        foreach (var collider in clone.GetComponents<CircleCollider2D>())
+                            Destroy(collider);
+                        foreach (Transform child in clone.transform)
+                            if (child.name != "wingSlot" && child.name != "Canvas")
+                                Destroy(child.gameObject);
+
+                        Canvas originalCanvas = original.GetComponentInChildren<Canvas>();
+                        if (originalCanvas != null)
+                        {
+                            // Create or find PlayerName text object to avoid duplicates
+                            var existingText = originalCanvas.transform.Find("PlayerName");
+                            TextMeshProUGUI text;
+                            if (existingText != null)
+                                text = existingText.GetComponent<TextMeshProUGUI>();
+                            else
+                            {
+                                GameObject textGO = new GameObject("PlayerName");
+                                textGO.transform.SetParent(originalCanvas.transform, false);
+                                text = textGO.AddComponent<TextMeshProUGUI>();
+                                RectTransform rt = text.GetComponent<RectTransform>();
+                                rt.anchoredPosition = new Vector2(0, 50); // position above character
+                                text.fontSize = 24;
+                                text.alignment = TextAlignmentOptions.Center;
+                                text.color = Color.white;
+                            }
+                            text.text = SteamClient.Name; // set player name text
+                        }
+                        else
+                        {
+                            Debug.LogWarning("No Canvas found in BloobCharacter.");
+                        }
 
 
 
-        //IEnumerator GetPositionEnumeratorDummy()
-        //{
-        //    // Seed dummy players for testing:
-        //    //dummyPositions["Alice"] = new Vector3(1, 2, 0);
-        //    //dummyPositions["Bob"] = new Vector3(-3, 4, 0);
+                        // Setup UI Text with playerName
+                        Canvas canvas = clone.GetComponentInChildren<Canvas>();
+                        if (canvas != null)
+                        {
+                            // Create or find PlayerName text object to avoid duplicates
+                            var existingText = canvas.transform.Find("PlayerName");
+                            TextMeshProUGUI text;
+                            if (existingText != null)
+                                text = existingText.GetComponent<TextMeshProUGUI>();
+                            else
+                            {
+                                GameObject textGO = new GameObject("PlayerName");
+                                textGO.transform.SetParent(canvas.transform, false);
+                                text = textGO.AddComponent<TextMeshProUGUI>();
+                                RectTransform rt = text.GetComponent<RectTransform>();
+                                rt.anchoredPosition = new Vector2(0, 50); // position above character
+                                text.fontSize = 24;
+                                text.alignment = TextAlignmentOptions.Center;
+                                text.color = Color.white;
+                            }
+                            text.text = playerName; // set player name text
+                        }
+                        else
+                        {
+                            Debug.LogWarning("No Canvas found in BloobClone.");
+                        }
+                    }
 
-        //    while (true)
-        //    {
-        //        //TODO Refactor to fit new data structure
-        //        foreach (var kvp in dummyPositions)
-        //        {
-        //            string playerName = kvp.Key;
-        //            Vector3 targetPos = kvp.Value;
+                    // Update desiredPositions dictionary for patch to use
+                    players[playerName].desiredPosition.x = targetPos.x;
+                    players[playerName].desiredPosition.y = targetPos.y;
+                    players[playerName].desiredPosition.z = targetPos.z;
+                }
 
-        //            // Find or create clone for this player
-        //            GameObject clone = GameObject.Find("BloobClone_" + playerName);
-        //            if (clone == null)
-        //            {
-        //                GameObject original = GameObject.Find("BloobCharacter");
-        //                if (original == null)
-        //                {
-        //                    Debug.LogWarning("BloobCharacter not found.");
-        //                    continue;
-        //                }
-
-        //                clone = Instantiate(original);
-        //                clone.name = "BloobClone_" + playerName;
-        //                clone.AddComponent<IsMultiplayerClone>();
-
-        //                // Remove unwanted components and children (same as your existing code)
-        //                foreach (var collider in clone.GetComponents<CircleCollider2D>())
-        //                    Destroy(collider);
-        //                foreach (Transform child in clone.transform)
-        //                    if (child.name != "wingSlot" && child.name != "Canvas")
-        //                        Destroy(child.gameObject);
-
-        //                // Setup UI Text with playerName
-        //                Canvas canvas = clone.GetComponentInChildren<Canvas>();
-        //                if (canvas != null)
-        //                {
-        //                    // Create or find PlayerName text object to avoid duplicates
-        //                    var existingText = canvas.transform.Find("PlayerName");
-        //                    TextMeshProUGUI text;
-        //                    if (existingText != null)
-        //                        text = existingText.GetComponent<TextMeshProUGUI>();
-        //                    else
-        //                    {
-        //                        GameObject textGO = new GameObject("PlayerName");
-        //                        textGO.transform.SetParent(canvas.transform, false);
-        //                        text = textGO.AddComponent<TextMeshProUGUI>();
-        //                        RectTransform rt = text.GetComponent<RectTransform>();
-        //                        rt.anchoredPosition = new Vector2(0, 50); // position above character
-        //                        text.fontSize = 24;
-        //                        text.alignment = TextAlignmentOptions.Center;
-        //                        text.color = Color.white;
-        //                    }
-        //                    text.text = playerName; // set player name text
-        //                }
-        //                else
-        //                {
-        //                    Debug.LogWarning("No Canvas found in BloobClone.");
-        //                }
-        //            }
-
-        //            // Update desiredPositions dictionary for patch to use
-        //            desiredPositions[playerName] = targetPos;
-        //        }
-
-        //        yield return new WaitForSeconds(30f);
-        //    }
-        //}
+                yield return new WaitForSeconds(30f);
+            }
+        }
 
 
 
@@ -212,6 +256,11 @@ namespace Multi_bloob_adventure_idle
         {
             while (true)
             {
+                if (!isReady)
+                {
+                    Debug.Log("Game not ready, retrying position coroutine in 5 seconds");
+                    yield return new WaitForSecondsRealtime(5);
+                }
                 CharacterData data = new CharacterData();
 
                 if (SteamClient.IsValid)
@@ -230,15 +279,15 @@ namespace Multi_bloob_adventure_idle
                     name = data.name,
                     currentPosition = new
                     {
-                        x = data.currentPosition.x,
-                        y = data.currentPosition.y,
-                        z = data.currentPosition.z
+                        x = Mathf.Round(data.currentPosition.x),
+                        y = Mathf.Round(data.currentPosition.y),
+                        z = Mathf.Round(data.currentPosition.z)
                     },
                     desiredPosition = new
                     {
-                        x = data.desiredPosition.x,
-                        y = data.desiredPosition.y,
-                        z = data.desiredPosition.z
+                        x = Mathf.Round(data.desiredPosition.x),
+                        y = Mathf.Round(data.desiredPosition.y),
+                        z = Mathf.Round(data.desiredPosition.z)
                     }
                 };
 
@@ -249,36 +298,8 @@ namespace Multi_bloob_adventure_idle
                 ws.Send(json);
 
                 
-
-
-                //  {
-                //      type: "addData"
-                //   data: [
-                //    {
-                //    "name" : "Bob",
-                //    "currentPosition": { "x": 1, "y": 2, "z": 0 },
-                //    "desiredPosition": { "x": 1, "y": 2, "z": 0 }
-                //    }
-                //    ]
-
-
-                /*
-                 * public class Position
-                 * {
-                 * public float x {get; set;}
-                 * 
-                 * WebSocketResponse response = JsonConvert.DeserializeObject<WebSocketResonse>(message);
-                 * 
-                 * if (response.type == "allData")
-                 * {
-                 *  foreach (var client in response.data)
-                 *  {
-                 *      string client = client.name
-                 *      vector3 clientCurrentPos = new Vector3 (client.currectPosition.x, client.currectPosition.y, client.currectPosition.z)
-                 */
-
                 Debug.Log("Hey shithead");
-                yield return new WaitForSeconds(30f);
+                yield return new WaitForSecondsRealtime(30f);
             }
 
         }
@@ -317,36 +338,40 @@ namespace Multi_bloob_adventure_idle
         public static void GetDesiredPosition(ref Vector2 destination)
         {
             MultiplayerPatchPlugin.desiredPosition = new Vector3(destination.x, destination.y, 0);
-            //object[] blah = new object[]{name, "desired", position}
-            //SendData(blah);
         }
     }
 
-    //[HarmonyPatch(typeof(CharacterMovement), "Update")]
-    //public class CharacterMovement_UpdatePatch
-    //{
-    //    static bool Prefix(CharacterMovement __instance)
-    //    {
-    //        var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
-    //        if (cloneComp != null)
-    //        {
-    //            string playerName = __instance.gameObject.name.Replace("BloobClone_", "");
-    //            if (MultiplayerPatchPlugin.desiredPositions.TryGetValue(playerName, out Vector3 targetPos))
-    //            {
-    //                if (cloneComp.lastTargetPosition != targetPos)
-    //                {
-    //                    __instance.MoveTo(targetPos);
-    //                    cloneComp.lastTargetPosition = targetPos;
-    //                }
-    //            }
-    //            // Skip original Update for clones
-    //            return false;
-    //        }
+    [HarmonyPatch(typeof(CharacterMovement), "Update")]
+    public class CharacterMovement_UpdatePatch
+    {
+        static bool Prefix(CharacterMovement __instance)
+        {
+            var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+            {
+                string playerName = __instance.gameObject.name.Replace("BloobClone_", "");
+                // Move to grabbing currentPosition of original clones
+                if (MultiplayerPatchPlugin.players.TryGetValue(playerName, out PlayerData player))
+                {
+                    if (Vector3.Distance(cloneComp.transform.position, player.desiredPosition.ToVector3()) >= 500f)
+                    {
+                        cloneComp.transform.position.Set(player.desiredPosition.x, player.desiredPosition.y, player.desiredPosition.z);
+                        return false;
+                    }
+                    if (cloneComp.lastTargetPosition != player.desiredPosition.ToVector3())
+                    {
+                        __instance.MoveTo(player.desiredPosition.ToVector3());
+                        cloneComp.lastTargetPosition = player.desiredPosition.ToVector3();
+                    }
+                }
+                // Skip original Update for clones
+                return false;
+            }
 
-    //        // Normal Update for local player
-    //        return true;
-    //    }
-    //}
+            // Normal Update for local player
+            return true;
+        }
+    }
 
 
 
@@ -371,12 +396,10 @@ namespace Multi_bloob_adventure_idle
     }
 }
 
-/*
- * Cache player location when player spawns. BloobCharacter.gameObject.transform.position
- * When player moves, update the cache and send the new position to the server.
- * On Update loop, check if the cache position is different from the desired position and only send and update data when it changes.
- * On player spawn, send some kind of initalisation data to the server so it can create a new clone on each connected client.
- * on Player disconnect, send a message to the server to remove the clone from all clients.
- * 
+/*TODO
+ * Cache only original player's current position to pass along
+ * Rewrite data structure to only pass currentPosition
+ * Update clone's movement to just goto clone data currentPosition
+ * On WB disconnect, clear data from all clients and handle removing of that specific clients clone from all connected clients
  */
 
