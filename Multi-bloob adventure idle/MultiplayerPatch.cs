@@ -45,7 +45,6 @@ namespace Multi_bloob_adventure_idle
             ws.OnError += (sender, e) => { Debug.Log("WebSocket Error:" + e.Message); };
             ws.OnClose += (sender, e) =>
             {
-                //TODO Pass through name of closing client
                 isConnected = false;
                 Debug.Log("WebSocket Connection Closed");
             };
@@ -73,7 +72,13 @@ namespace Multi_bloob_adventure_idle
 
         private void OnApplicationQuit()
         {
-            //TODO Handle closing WS
+            var payload = new
+            {
+                reason = "ClientExiting",
+                name = SteamClient.Name
+            };
+            var json = JsonConvert.SerializeObject(payload);
+            ws.Send(json);
             ws.Close();
         }
 
@@ -111,7 +116,7 @@ namespace Multi_bloob_adventure_idle
                         {
                             var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
                             //TODO Switch message?.type
-                            // Add closing type to handle removing of closing clients
+                            //TODO Add closing type to handle removing of closing clients
                             if (message?.type == "allData" && message.data != null)
                             {
                                 lock (players)
@@ -136,12 +141,22 @@ namespace Multi_bloob_adventure_idle
         public void OnActiveSceneChanged(Scene a, Scene b)
         {
             //TODO Handle cleaning up of gameObjects when exiting to main menu and recreating gameObjects re-entering back into the game
-            if (b.name == "GameCloud")
+            switch (b.name)
             {
-                isReady = true;
-                lastScene = b;
-                //Debug.Log($"Scene A is {a.name} Scene B is {b.name}");
+                case "GameCloud":
+                    isReady = true;
+                    lastScene = b;
+                    break;
             }
+
+
+
+            //if (b.name == "GameCloud")
+            //{
+            //    isReady = true;
+            //    lastScene = b;
+            //    //Debug.Log($"Scene A is {a.name} Scene B is {b.name}");
+            //}
 
         }
 
