@@ -117,8 +117,11 @@ namespace Multi_bloob_adventure_idle
                             var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
                             //TODO Switch message?.type
                             //TODO Add closing type to handle removing of closing clients
-                            if (message?.type == "allData" && message.data != null)
+                            if (message.data == null) return;
+
+                            switch (message?.type)
                             {
+                            case "allData":
                                 lock (players)
                                 {
                                     foreach (var playerData in message.data)
@@ -128,7 +131,20 @@ namespace Multi_bloob_adventure_idle
                                         Debug.Log($"Added player {playerData.name} to cached data. Their starting position is {playerData.currentPosition.ToVector3()}");
                                     }
                                 }
+                                break;
+                            case "PLACEHOLDER FOR DISCONNECT":
+                                int i = 0;
+                                foreach (var playerData in message.data)
+                                {
+                                    if (playerData.name == SteamClient.Name && !playerData.isDisconnecting) break;
+                                    HandleClientDisconnect(playerData.name);
+                                    Debug.Log($"{playerData.name} has disconnected.");
+                                    i++;
+                                }
+                                Debug.Log($"Detected {i} disconnected clients, removing from game world.");
+                                break;
                             }
+
                         }
                         catch (System.Exception ex)
                         {
@@ -149,8 +165,6 @@ namespace Multi_bloob_adventure_idle
                     break;
             }
 
-
-
             //if (b.name == "GameCloud")
             //{
             //    isReady = true;
@@ -160,6 +174,12 @@ namespace Multi_bloob_adventure_idle
 
         }
 
+        public void HandleClientDisconnect(string name)
+        {
+            var clone = GameObject.Find($"BloobClone_{name}");
+            if (clone == null) return;
+            GameObject.DestroyImmediate(clone);
+        }
 
         IEnumerator UpdateGhostPlayers()
         {
@@ -196,7 +216,7 @@ namespace Multi_bloob_adventure_idle
                         foreach (var collider in clone.GetComponents<CircleCollider2D>())
                             Destroy(collider);
                         foreach (Transform child in clone.transform)
-                            if (child.name != "wingSlot" && child.name != "Canvas")
+                            if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
                                 Destroy(child.gameObject);
 
                         Canvas originalCanvas = original.GetComponentInChildren<Canvas>();
@@ -323,8 +343,12 @@ namespace Multi_bloob_adventure_idle
     public class PlayerData
     {
         public string name;
+        public bool isDisconnecting;
         public Vector3Like currentPosition;
         public Vector3Like desiredPosition;
+        public string hatName;
+        public string wingName;
+        public string bloobColour;
     }
 
     public class Vector3Like
