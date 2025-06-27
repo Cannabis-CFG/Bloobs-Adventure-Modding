@@ -21,8 +21,8 @@ namespace Multi_bloob_adventure_idle
 
         private WebSocket ws;
         private bool isConnected = false;
+        private static GameObject playerGameObject;
         public static Vector3 currentPosition;
-        public static Vector3 desiredPosition;
         private Coroutine positionCoroutine;
         private Coroutine ghostPlayerCoroutine;
         public static bool isReady = false;
@@ -57,7 +57,6 @@ namespace Multi_bloob_adventure_idle
             };
 
             ws.ConnectAsync ();
-            Harmony.CreateAndPatchAll(typeof(GetDesiredPositionPatch));
             Harmony.CreateAndPatchAll(typeof(CharacterMovement_UpdatePatch));
 
             if (ws == null) { Debug.Log("WS NULL"); };
@@ -105,6 +104,7 @@ namespace Multi_bloob_adventure_idle
                 GameObject player = GameObject.Find("BloobCharacter");
                 if (player != null)
                     currentPosition = player.transform.position;
+                if (playerGameObject == null) playerGameObject = player;
 
                 lock (queueLock)
                 {
@@ -191,11 +191,10 @@ namespace Multi_bloob_adventure_idle
                     Debug.Log("Game not ready, retrying ghost player update in 5 seconds");
                     yield return new WaitForSecondsRealtime(5f);
                 }
-                //TODO Refactor to fit new data structure
                 foreach (var kvp in players)
                 {
                     string playerName = kvp.Key;
-                    Vector3 targetPos = kvp.Value.desiredPosition.ToVector3();
+                    Vector3 targetPos = kvp.Value.currentPosition.ToVector3();
 
                     // Find or create clone for this player
                     GameObject clone = GameObject.Find("BloobClone_" + playerName);
@@ -275,10 +274,6 @@ namespace Multi_bloob_adventure_idle
                         }
                     }
 
-                    // Update desiredPositions dictionary for patch to use
-                    players[playerName].desiredPosition.x = targetPos.x;
-                    players[playerName].desiredPosition.y = targetPos.y;
-                    players[playerName].desiredPosition.z = targetPos.z;
                 }
 
                 yield return new WaitForSeconds(30f);
@@ -302,13 +297,11 @@ namespace Multi_bloob_adventure_idle
                 {
                     data.name = SteamClient.Name;
                 }
-                if (currentPosition == null || desiredPosition == null) yield break;
+                if (currentPosition == null) yield break;
 
-                data.desiredPosition = desiredPosition;
-                Debug.Log(desiredPosition);
                 data.currentPosition = currentPosition;
                 Debug.Log(currentPosition);
-
+                //TODO Pass along live current positioning and hat, wing and color parameters
                 var payload = new
                 {
                     name = data.name,
@@ -318,12 +311,7 @@ namespace Multi_bloob_adventure_idle
                         y = Mathf.Round(data.currentPosition.y),
                         z = Mathf.Round(data.currentPosition.z)
                     },
-                    desiredPosition = new
-                    {
-                        x = Mathf.Round(data.desiredPosition.x),
-                        y = Mathf.Round(data.desiredPosition.y),
-                        z = Mathf.Round(data.desiredPosition.z)
-                    }
+
                 };
 
                 string json = JsonConvert.SerializeObject(payload);
@@ -345,10 +333,9 @@ namespace Multi_bloob_adventure_idle
         public string name;
         public bool isDisconnecting;
         public Vector3Like currentPosition;
-        public Vector3Like desiredPosition;
         public string hatName;
         public string wingName;
-        public string bloobColour;
+        public Color bloobColour;
     }
 
     public class Vector3Like
@@ -366,19 +353,9 @@ namespace Multi_bloob_adventure_idle
 
         public Vector3 currentPosition { get; set; }
 
-        public Vector3 desiredPosition { get; set; }
     }
 
 
-    [HarmonyPatch(typeof(CharacterMovement), nameof(CharacterMovement.MoveTo))]
-    public static class GetDesiredPositionPatch
-    {
-        [HarmonyPostfix]
-        public static void GetDesiredPosition(ref Vector2 destination)
-        {
-            MultiplayerPatchPlugin.desiredPosition = new Vector3(destination.x, destination.y, 0);
-        }
-    }
 
     [HarmonyPatch(typeof(CharacterMovement), "Update")]
     public class CharacterMovement_UpdatePatch
@@ -392,15 +369,15 @@ namespace Multi_bloob_adventure_idle
                 // Move to grabbing currentPosition of original clones
                 if (MultiplayerPatchPlugin.players.TryGetValue(playerName, out PlayerData player))
                 {
-                    if (Vector3.Distance(cloneComp.transform.position, player.desiredPosition.ToVector3()) >= 500f)
+                    if (Vector3.Distance(cloneComp.transform.position, player.currentPosition.ToVector3()) >= 500f)
                     {
-                        cloneComp.transform.position.Set(player.desiredPosition.x, player.desiredPosition.y, player.desiredPosition.z);
+                        cloneComp.transform.position.Set(player.currentPosition.x, player.currentPosition.y, player.currentPosition.z);
                         return false;
                     }
-                    if (cloneComp.lastTargetPosition != player.desiredPosition.ToVector3())
+                    if (cloneComp.lastTargetPosition != player.currentPosition.ToVector3())
                     {
-                        __instance.MoveTo(player.desiredPosition.ToVector3());
-                        cloneComp.lastTargetPosition = player.desiredPosition.ToVector3();
+                        __instance.MoveTo(player.currentPosition.ToVector3());
+                        cloneComp.lastTargetPosition = player.currentPosition.ToVector3();
                     }
                 }
                 // Skip original Update for clones
