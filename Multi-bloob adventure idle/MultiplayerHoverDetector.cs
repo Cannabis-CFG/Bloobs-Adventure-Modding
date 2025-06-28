@@ -10,7 +10,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
 
     void Start()
     {
-        cam = Camera.main;
+        //cam = Camera.current;
     }
 
     void Update()
@@ -18,9 +18,12 @@ public class MultiplayerHoverDetector : MonoBehaviour
         if (!MultiplayerPatchPlugin.isReady || cam == null)
             return;
 
+        if (cam == null) cam = Camera.current;
+
         Ray ray = cam.ScreenPointToRay(Input.mousePosition);
         if (Physics.Raycast(ray, out RaycastHit hit))
         {
+            Debug.Log("Physics raycast has hit something, checking for multiplayer clone comp");
             var cloneComp = hit.collider?.GetComponent<IsMultiplayerClone>();
             if (cloneComp != null)
             {

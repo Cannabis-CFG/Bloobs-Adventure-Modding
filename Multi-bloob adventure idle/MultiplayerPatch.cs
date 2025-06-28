@@ -66,7 +66,7 @@ namespace Multi_bloob_adventure_idle
             };
 
             ws.ConnectAsync();
-            Harmony.CreateAndPatchAll(typeof(CharacterMovement_UpdatePatch));
+            //Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
 
             if (ws == null) { Debug.Log("WS NULL"); }
             ;
@@ -198,7 +198,6 @@ namespace Multi_bloob_adventure_idle
             Dictionary<string, string> NameMap = new()
             {
                 { "WoodCutting", "Woodcutting" }
-                //{ "SoulBinding", "Soulbinding" }
               
             };
 
@@ -207,19 +206,17 @@ namespace Multi_bloob_adventure_idle
             GameObject player = GameObject.Find("BloobCharacter");
             foreach (Transform child in player.transform)
             {
-                // Skip irrelevant children
+
                 if (child.name is null or "Weapon Point" or "MagicWeapon Point" or "RangeWeapon Point" or "Melee Weapon" or "MeleeWeapon" or "MagicProjectile" or "RangeProjectile" or "wingSlot" or "hatSlot" or "Canvas")
                 {
                     continue; // CUNT
                 }
 
-                // Normalize child name
                 string childName = NameMap.TryGetValue(child.name, out var value) ? value : child.name;
 
-                // Build skill class name
                 string skillClassName = childName + "Skill";
 
-                // Handle known exceptional class names
+                // Skill Class Name edge cases
                 if (childName == "SoulBinding")
                     skillClassName = "SoulBinding";
 
@@ -384,6 +381,20 @@ namespace Multi_bloob_adventure_idle
                                 Debug.LogWarning("No Canvas found in BloobClone.");
                             }
                         }
+                        Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
+                        if (kvp.Value.currentPosition.ToVector3() == clone.transform.position) continue;
+                        if (Vector2.Distance(new Vector2(clone.transform.position.x, clone.transform.position.y),
+                                new Vector2(kvp.Value.currentPosition.x, kvp.Value.currentPosition.y)) >= 750f)
+                        {
+                            Debug.Log($"Detected potential different zone for clone from previous dataset, attempting teleport to {kvp.Value.currentPosition.ToVector3()}");
+                            clone.transform.position.Set(kvp.Value.currentPosition.x, kvp.Value.currentPosition.y, kvp.Value.currentPosition.z);
+                            Debug.Log($"Set the clones position to {kvp.Value.currentPosition.ToVector3()}, clones actual current position is {clone.transform.position}");
+                            continue;
+                        }
+                        Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
+                        clone.GetComponent<CharacterMovement>()
+                            .MoveTo(new Vector2(kvp.Value.currentPosition.x, kvp.Value.currentPosition.y));
+
 
                     }
 
@@ -622,8 +633,9 @@ namespace Multi_bloob_adventure_idle
 
 
 
+    /*
     [HarmonyPatch(typeof(CharacterMovement), "Update")]
-    public class CharacterMovement_UpdatePatch
+    public class CharacterMovementUpdatePatch
     {
         static bool Prefix(CharacterMovement __instance)
         {
@@ -638,7 +650,7 @@ namespace Multi_bloob_adventure_idle
                     {
                         cloneComp.transform.position.Set(player.currentPosition.x, player.currentPosition.y, player.currentPosition.z);
                         return false;
-                    }*/
+                    }#1#
                     if (cloneComp.lastTargetPosition != player.currentPosition.ToVector3())
                     {
                         __instance.MoveTo(player.currentPosition.ToVector3());
@@ -653,6 +665,7 @@ namespace Multi_bloob_adventure_idle
             return true;
         }
     }
+    */
 
 
 
