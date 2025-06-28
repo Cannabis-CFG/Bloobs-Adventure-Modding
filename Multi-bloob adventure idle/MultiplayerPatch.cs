@@ -1,14 +1,18 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System;
 using BepInEx;
 using HarmonyLib;
 using Newtonsoft.Json;
 using Steamworks;
+using System.Collections;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using WebSocketSharp;
+
 
 namespace Multi_bloob_adventure_idle
 {
@@ -18,18 +22,18 @@ namespace Multi_bloob_adventure_idle
 
         private readonly Queue<string> messageQueue = new Queue<string>();
         private readonly object queueLock = new object();
+        Dictionary<string, (int level, int prestige)> playerSkills = new Dictionary<string, (int level, int prestige)>();
 
         private WebSocket ws;
         private bool isConnected = false;
-        private static GameObject playerGameObject;
-        public static Vector3 currentPosition;
+
         private Coroutine positionCoroutine;
         private Coroutine ghostPlayerCoroutine;
+        private Coroutine playerLevelCoroutine;
         public static bool isReady = false;
+        private string nameCache;
         private Scene lastScene;
 
-        //public static Dictionary<string, Vector3> dummyPositions = new Dictionary<string, Vector3>();
-        //public static Dictionary<string, Vector3> desiredPositions = new Dictionary<string, Vector3>();
         public static readonly Dictionary<string, PlayerData> players = new Dictionary<string, PlayerData>();
 
         private void Awake()
@@ -66,15 +70,14 @@ namespace Multi_bloob_adventure_idle
                 Debug.Log($"Have dataset: {players}");
             }
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
-            StartCoroutine(Test());
-        }
+            }
 
         private void OnApplicationQuit()
         {
             var payload = new
             {
                 reason = "ClientExiting",
-                name = SteamClient.Name
+                name = nameCache
             };
             var json = JsonConvert.SerializeObject(payload);
             ws.Send(json);
@@ -82,46 +85,36 @@ namespace Multi_bloob_adventure_idle
         }
 
 
-        IEnumerator Test()
-        {
-            while (true)
-            {
-                Debug.Log($"Retrying dataset post: {string.Join(", ", players.Keys)}\nRetrying in 10 seconds");
-                yield return new WaitForSecondsRealtime(10);
-            }
-        }
-
-
         private void Start()
         {
-            if (positionCoroutine == null) positionCoroutine = StartCoroutine(GetPositionEnumerator());
-            if (ghostPlayerCoroutine == null) ghostPlayerCoroutine = StartCoroutine(UpdateGhostPlayers());
+            positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
+            ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
+            playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
         }
 
         private void Update()
         {
-            if (!isReady) return;
-                GameObject player = GameObject.Find("BloobCharacter");
-                if (player != null)
-                    currentPosition = player.transform.position;
-                if (playerGameObject == null) playerGameObject = player;
+            if (!isReady || !SteamClient.IsValid) return;
+            GameObject player = GameObject.Find("BloobCharacter");
+            if (nameCache.IsNullOrEmpty()) nameCache = SteamClient.Name;
 
-                lock (queueLock)
+            lock (queueLock)
+            {
+                while (messageQueue.Count > 0)
                 {
-                    while (messageQueue.Count > 0)
+                    string json = messageQueue.Dequeue();
+                    Debug.Log("Got message from WS: " + json);
+                    try
                     {
-                        string json = messageQueue.Dequeue();
-                        Debug.Log("Got message from WS: " + json);
-                        try
-                        {
-                            var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
-                            //TODO Switch message?.type
-                            //TODO Add closing type to handle removing of closing clients
-                            if (message.data == null) return;
+                        var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
+                        //TODO Switch message?.type
+                        //TODO Add closing type to handle removing of closing clients
+                        if (message.data == null) return;
 
-                            switch (message?.type)
-                            {
+                        switch (message?.type)
+                        {
                             case "allData":
+                                int i = 0;
                                 lock (players)
                                 {
                                     foreach (var playerData in message.data)
@@ -129,34 +122,33 @@ namespace Multi_bloob_adventure_idle
                                         if (playerData.name == SteamClient.Name) break;
                                         players[playerData.name] = playerData;
                                         Debug.Log($"Added player {playerData.name} to cached data. Their starting position is {playerData.currentPosition.ToVector3()}");
+                                        if (playerData.isDisconnecting)
+                                        {
+                                            HandleClientDisconnect(playerData.name);
+                                            Debug.Log($"Player {playerData.name} has disconnected.");
+                                            i++;
+                                        }
                                     }
+                                    if (i > 0) Debug.Log($"Detected {i} disconnected clients, removing from game world.");
                                 }
                                 break;
-                            case "PLACEHOLDER FOR DISCONNECT":
-                                int i = 0;
-                                foreach (var playerData in message.data)
-                                {
-                                    if (playerData.name == SteamClient.Name && !playerData.isDisconnecting) break;
-                                    HandleClientDisconnect(playerData.name);
-                                    Debug.Log($"{playerData.name} has disconnected.");
-                                    i++;
-                                }
-                                Debug.Log($"Detected {i} disconnected clients, removing from game world.");
-                                break;
-                            }
+                        }
 
-                        }
-                        catch (System.Exception ex)
-                        {
-                            Debug.LogError("Failed to handle WS message: " + ex);
-                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError("Failed to handle WS message: " + ex);
                     }
                 }
+            }
         }
 
-        public void OnActiveSceneChanged(Scene a, Scene b)
-        {
+        public async void OnActiveSceneChanged(Scene a, Scene b)
+            { 
             //TODO Handle cleaning up of gameObjects when exiting to main menu and recreating gameObjects re-entering back into the game
+
+            await Task.Delay(TimeSpan.FromSeconds(15));
+
             switch (b.name)
             {
                 case "GameCloud":
@@ -179,6 +171,143 @@ namespace Multi_bloob_adventure_idle
             var clone = GameObject.Find($"BloobClone_{name}");
             if (clone == null) return;
             GameObject.DestroyImmediate(clone);
+            players.Remove(name);
+        }
+
+
+        IEnumerator UpdatePlayerLevels()
+        {
+            if (!isReady)
+            {
+                Debug.Log("Game not ready, retrying player level update in 10 seconds.");
+                yield return new WaitForSecondsRealtime(10f);
+            }
+
+            Dictionary<string, string> NameMap = new()
+            {
+                { "WoodCutting", "Woodcutting" }
+                //{ "SoulBinding", "Soulbinding" }
+              
+            };
+
+            Dictionary<string, (int level, int prestige)> skillData = new();
+
+            GameObject player = GameObject.Find("BloobCharacter");
+            foreach (Transform child in player.transform)
+            {
+                // Skip irrelevant children
+                if (child.name is null
+                    || child.name == "Weapon Point"
+                    || child.name == "MagicWeapon Point"
+                    || child.name == "RangeWeapon Point"
+                    || child.name == "Melee Weapon"
+                    || child.name == "MeleeWeapon"
+                    || child.name == "MagicProjectile"
+                    || child.name == "RangeProjectile"
+                    || child.name == "wingSlot"
+                    || child.name == "hatSlot"
+                    || child.name == "Canvas")
+                {
+                    continue; // CUNT
+                }
+
+                // Normalize child name
+                string childName = NameMap.TryGetValue(child.name, out var value) ? value : child.name;
+
+                // Build skill class name
+                string skillClassName = childName + "Skill";
+
+                // Handle known exceptional class names
+                if (childName == "SoulBinding")
+                    skillClassName = "SoulBinding";
+
+
+                // Try to get the component dynamically
+                Component skillComponent = child.GetComponent(skillClassName);
+                if (skillComponent == null)
+                {
+                    Debug.LogWarning($"No component {skillClassName} found on {childName}");
+                    continue;
+                }
+
+                // Determine proper field names
+                string levelFieldName = childName + "Level";
+                string prestigeFieldName = childName.ToLower() + "PrestigeLevel";
+
+                // Additional edge cases for inconsistent field names
+                if (childName.Equals("HitPoints"))
+                {
+                    levelFieldName = "HitPointsLevel";
+                    prestigeFieldName = "HitPointsPrestigeLevel";
+                }
+
+                if (childName.Equals("Mining"))
+                {
+                    levelFieldName = "MiningLevel";
+                }
+
+                if (childName.Equals("WoodCutting"))
+                {
+                    levelFieldName = "woodcuttinglevel";
+                }
+
+                if (childName.Equals("SoulBinding"))
+                {
+                    levelFieldName = "SoulBindingLevel";
+                    prestigeFieldName = "SoulBindingPrestigeLevel";
+                }
+
+                if (childName.Equals("BowCrafting"))
+                {
+                    prestigeFieldName = "bowCraftingPrestigeLevel";
+                }
+
+                if (childName.Equals("BeastMastery"))
+                {
+                    prestigeFieldName = "beastMasteryPrestigeLevel";
+                }
+
+                if (childName.Equals("Thieving"))
+                {
+                    levelFieldName = "ThievingLevel";
+                }
+
+                if (childName.Equals("Fishing"))
+                {
+                    levelFieldName = "FishingLevel";
+                }
+
+                int level = GetIntField(skillComponent, levelFieldName);
+                int prestige = GetIntField(skillComponent, prestigeFieldName);
+
+                skillData[childName] = (level, prestige);
+                Debug.Log($"[Skill] {childName}: Level={level} Prestige={prestige}");
+            }
+
+            playerSkills = skillData;
+            yield return new WaitForSecondsRealtime(600f);
+        }
+
+        int GetIntField(Component comp, string fieldName)
+        {
+            var type = comp.GetType();
+            var field = type.GetField(
+                fieldName,
+                System.Reflection.BindingFlags.IgnoreCase
+                | System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Instance
+            );
+
+            if (field != null && field.FieldType == typeof(int))
+            {
+                return (int)field.GetValue(comp);
+            }
+            else
+            {
+                Debug.LogWarning($"Field '{fieldName}' not found on {type.Name}");
+                return -1;
+            }
         }
 
         IEnumerator UpdateGhostPlayers()
@@ -188,92 +317,100 @@ namespace Multi_bloob_adventure_idle
             {
                 if (!isReady)
                 {
-                    Debug.Log("Game not ready, retrying ghost player update in 5 seconds");
-                    yield return new WaitForSecondsRealtime(5f);
+                    Debug.Log("Game not ready, retrying ghost player update in 15 seconds");
+                    yield return new WaitForSecondsRealtime(15f);
                 }
-                foreach (var kvp in players)
+
+                GameObject original = GameObject.Find("BloobCharacter");
+                if (original == null)
                 {
-                    string playerName = kvp.Key;
-                    Vector3 targetPos = kvp.Value.currentPosition.ToVector3();
+                    Debug.LogWarning("BloobCharacter not found.");
+                    continue;
+                }
 
-                    // Find or create clone for this player
-                    GameObject clone = GameObject.Find("BloobClone_" + playerName);
-                    if (clone == null)
+                lock (players)
+                {
+                    foreach (var kvp in players)
                     {
-                        GameObject original = GameObject.Find("BloobCharacter");
-                        if (original == null)
+                        string playerName = kvp.Key;
+                        Vector3 targetPos = kvp.Value.currentPosition.ToVector3();
+
+                        // Find or create clone for this player
+                        GameObject clone = GameObject.Find("BloobClone_" + playerName);
+                        if (clone == null)
                         {
-                            Debug.LogWarning("BloobCharacter not found.");
-                            continue;
-                        }
 
-                        clone = Instantiate(original);
-                        clone.name = "BloobClone_" + playerName;
-                        clone.AddComponent<IsMultiplayerClone>();
 
-                        // Remove unwanted components and children (same as your existing code)
-                        foreach (var collider in clone.GetComponents<CircleCollider2D>())
-                            Destroy(collider);
-                        foreach (Transform child in clone.transform)
-                            if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
-                                Destroy(child.gameObject);
+                            clone = Instantiate(original);
+                            clone.name = "BloobClone_" + playerName;
+                            clone.AddComponent<IsMultiplayerClone>();
+                            clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
 
-                        Canvas originalCanvas = original.GetComponentInChildren<Canvas>();
-                        if (originalCanvas != null)
-                        {
-                            // Create or find PlayerName text object to avoid duplicates
-                            var existingText = originalCanvas.transform.Find("PlayerName");
-                            TextMeshProUGUI text;
-                            if (existingText != null)
-                                text = existingText.GetComponent<TextMeshProUGUI>();
+                            // Remove unwanted components and children (same as your existing code)
+                            foreach (var collider in clone.GetComponents<CircleCollider2D>())
+                                Destroy(collider);
+                            //Remove Children From BloobCharacter(Player Character) Game Object
+                            foreach (Transform child in clone.transform)
+                                if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
+                                    Destroy(child.gameObject);
+
+
+                            // Setup UI Text with playerName
+                            Canvas canvas = clone.GetComponentInChildren<Canvas>();
+                            if (canvas != null)
+                            {
+                                // Create or find PlayerName text object to avoid duplicates
+                                var existingText = canvas.transform.Find("PlayerName");
+                                TextMeshProUGUI text;
+                                if (existingText != null)
+                                    text = existingText.GetComponent<TextMeshProUGUI>();
+                                else
+                                {
+                                    GameObject textGO = new GameObject("PlayerName");
+                                    textGO.transform.SetParent(canvas.transform, false);
+                                    text = textGO.AddComponent<TextMeshProUGUI>();
+                                    RectTransform rt = text.GetComponent<RectTransform>();
+                                    rt.anchoredPosition = new Vector2(0, 50); // position above character
+                                    text.fontSize = 24;
+                                    text.alignment = TextAlignmentOptions.Center;
+                                    text.color = Color.white;
+                                }
+                                text.text = playerName; // set player name text
+                            }
                             else
                             {
-                                GameObject textGO = new GameObject("PlayerName");
-                                textGO.transform.SetParent(originalCanvas.transform, false);
-                                text = textGO.AddComponent<TextMeshProUGUI>();
-                                RectTransform rt = text.GetComponent<RectTransform>();
-                                rt.anchoredPosition = new Vector2(0, 50); // position above character
-                                text.fontSize = 24;
-                                text.alignment = TextAlignmentOptions.Center;
-                                text.color = Color.white;
+                                Debug.LogWarning("No Canvas found in BloobClone.");
                             }
-                            text.text = SteamClient.Name; // set player name text
-                        }
-                        else
-                        {
-                            Debug.LogWarning("No Canvas found in BloobCharacter.");
                         }
 
-
-
-                        // Setup UI Text with playerName
-                        Canvas canvas = clone.GetComponentInChildren<Canvas>();
-                        if (canvas != null)
-                        {
-                            // Create or find PlayerName text object to avoid duplicates
-                            var existingText = canvas.transform.Find("PlayerName");
-                            TextMeshProUGUI text;
-                            if (existingText != null)
-                                text = existingText.GetComponent<TextMeshProUGUI>();
-                            else
-                            {
-                                GameObject textGO = new GameObject("PlayerName");
-                                textGO.transform.SetParent(canvas.transform, false);
-                                text = textGO.AddComponent<TextMeshProUGUI>();
-                                RectTransform rt = text.GetComponent<RectTransform>();
-                                rt.anchoredPosition = new Vector2(0, 50); // position above character
-                                text.fontSize = 24;
-                                text.alignment = TextAlignmentOptions.Center;
-                                text.color = Color.white;
-                            }
-                            text.text = playerName; // set player name text
-                        }
-                        else
-                        {
-                            Debug.LogWarning("No Canvas found in BloobClone.");
-                        }
                     }
 
+                    Canvas originalCanvas = original.GetComponentInChildren<Canvas>();
+                    if (originalCanvas != null)
+                    {
+                        // Create or find PlayerName text object to avoid duplicates
+                        var existingText = originalCanvas.transform.Find("PlayerName");
+                        TextMeshProUGUI text;
+                        if (existingText != null)
+                            text = existingText.GetComponent<TextMeshProUGUI>();
+                        else
+                        {
+                            GameObject textGO = new GameObject("PlayerName");
+                            textGO.transform.SetParent(originalCanvas.transform, false);
+                            text = textGO.AddComponent<TextMeshProUGUI>();
+                            RectTransform rt = text.GetComponent<RectTransform>();
+                            rt.anchoredPosition = new Vector2(0, 50); // position above character
+                            text.fontSize = 24;
+                            text.alignment = TextAlignmentOptions.Center;
+                            text.color = Color.white;
+                            Debug.LogWarning("PlayerName Text Created");
+                        }
+                        text.text = SteamClient.Name; // set player name text
+                    }
+                    else
+                    {
+                        Debug.LogWarning("No Canvas found in BloobCharacter.");
+                    }
                 }
 
                 yield return new WaitForSeconds(30f);
@@ -288,29 +425,31 @@ namespace Multi_bloob_adventure_idle
             {
                 if (!isReady)
                 {
-                    Debug.Log("Game not ready, retrying position coroutine in 5 seconds");
-                    yield return new WaitForSecondsRealtime(5);
+                    Debug.Log("Game not ready, retrying position coroutine in 15 seconds");
+                    yield return new WaitForSecondsRealtime(15);
                 }
-                CharacterData data = new CharacterData();
+                GameObject player = GameObject.Find("BloobCharacter");
 
-                if (SteamClient.IsValid)
-                {
-                    data.name = SteamClient.Name;
-                }
-                if (currentPosition == null) yield break;
-
-                data.currentPosition = currentPosition;
-                Debug.Log(currentPosition);
                 //TODO Pass along live current positioning and hat, wing and color parameters
                 var payload = new
                 {
-                    name = data.name,
+                    name = SteamClient.Name,
                     currentPosition = new
                     {
-                        x = Mathf.Round(data.currentPosition.x),
-                        y = Mathf.Round(data.currentPosition.y),
-                        z = Mathf.Round(data.currentPosition.z)
+                        x = Mathf.Round(player.transform.position.x),
+                        y = Mathf.Round(player.transform.position.y),
+                        z = Mathf.Round(player.transform.position.z)
                     },
+                    isDisconnecting = false,
+                    skillData = playerSkills,
+                    bloobColour = new ColourLike()
+                    {
+                        //playerGameObject.GetComponent<SpriteRenderer>().color
+                        a = player.GetComponent<SpriteRenderer>().color.a,
+                        b = player.GetComponent<SpriteRenderer>().color.b,
+                        g = player.GetComponent<SpriteRenderer>().color.g,
+                        r = player.GetComponent<SpriteRenderer>().color.r
+                    }
 
                 };
 
@@ -335,7 +474,8 @@ namespace Multi_bloob_adventure_idle
         public Vector3Like currentPosition;
         public string hatName;
         public string wingName;
-        public Color bloobColour;
+        public ColourLike bloobColour;
+        public Dictionary<string, (int level, int prestige)> skillData;
     }
 
     public class Vector3Like
@@ -347,12 +487,14 @@ namespace Multi_bloob_adventure_idle
         public Vector3 ToVector3() => new Vector3(x, y, z);
     }
 
-    public class CharacterData
+    public class ColourLike
     {
-        public string name { get; set; }
+        public float a;
+        public float r;
+        public float g;
+        public float b;
 
-        public Vector3 currentPosition { get; set; }
-
+        public Color ToColor() => new Color(r, g, b, a);
     }
 
 
@@ -411,11 +553,4 @@ namespace Multi_bloob_adventure_idle
         }
     }
 }
-
-/*TODO
- * Cache only original player's current position to pass along
- * Rewrite data structure to only pass currentPosition
- * Update clone's movement to just goto clone data currentPosition
- * On WB disconnect, clear data from all clients and handle removing of that specific clients clone from all connected clients
- */
 
