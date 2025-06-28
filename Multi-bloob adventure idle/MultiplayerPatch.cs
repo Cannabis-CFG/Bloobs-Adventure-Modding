@@ -493,37 +493,97 @@ namespace Multi_bloob_adventure_idle
                 Debug.LogError("GameCanvas not found!");
                 return;
             }
-            Transform t1 = canvas.transform.Find("Player Menu/Bar");
-            if (t1 == null) Debug.LogError("Player Menu not found");
-            
-                else
+
+            // Find literal GameObject named "Player Menu/Bar"
+            Transform playerMenuBar = null;
+            foreach (Transform child in canvas.transform)
+            {
+                if (child.name == "Player Menu/Bar")
                 {
-                    Transform t2 = t1.Find("Menu Bar");
-                    if (t2 == null) Debug.LogError("Menu Bar not found");
-                    else
-                    {
-                        Transform t3 = t2.Find("Settings Ui");
-                        if (t3 == null) Debug.LogError("Settings Ui not found");
-                        else Debug.Log("Settings Ui found!");
-                    }
+                    playerMenuBar = child;
+                    break;
                 }
+            }
+
+            if (playerMenuBar == null)
+            {
+                Debug.LogError("Player Menu/Bar not found directly under GameCanvas");
+                return;
+            }
+
+            // Find "Menu Bar" under "Player Menu/Bar"
+            Transform menuBar = playerMenuBar.Find("Menu Bar");
+            if (menuBar == null)
+            {
+                Debug.LogError("Menu Bar not found under Player Menu/Bar");
+                return;
+            }
+
+            // Find "Settings Ui" under "Menu Bar"
+            Transform settingsUi = menuBar.Find("Settings Ui");
+            if (settingsUi == null)
+            {
+                Debug.LogError("Settings Ui not found under Menu Bar");
+                return;
+            }
+
+            Debug.Log("Settings Ui found!");
+
+            // Look for "Sound Off" under "Settings Ui"
+            Transform soundOff = settingsUi.Find("Sound Off");
+            if (soundOff == null)
+            {
+                Debug.LogError("Sound Off not found under Settings Ui");
+                return;
+            }
+
+            Debug.Log("Sound Off Found");
+
+            // Add toggles
+            AddButton(settingsUi, "Enable Ghost Souls", EnableGhostSouls, new Vector2(150, 160));
+            AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 115));
+
         }
 
-            //GameObject SettingsUI = settingsTransform.gameObject;
-            //if (SettingsUI == null) { Debug.Log("Cry"); return; }
-            //foreach (Transform child in SettingsUI.transform)
-            //{
-            //    GameObject childObject = child.gameObject;
 
-            //    if (childObject == null || string.IsNullOrEmpty(childObject.name)) { Debug.Log("Child.Name Null"); continue; }
-            //    Debug.Log(childObject.name);
+        private void AddButton(Transform parent, string labelText, ConfigEntry<bool> configEntry, Vector2 position)
+        {
+            // Create button object
+            GameObject buttonObj = new GameObject(labelText + " Button");
+            buttonObj.transform.SetParent(parent, false);
 
-            //    if (childObject.name == "Sound Off")
-            //    {
-            //        Instantiate(childObject, SettingsUI.transform);
-            //        Debug.Log("Sound Off Button Cloned");
-            //    }
-            //}
+            RectTransform rt = buttonObj.AddComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(300, 40);
+            rt.anchoredPosition = position;
+
+            // Add Button + Image (Unity UI requirement)
+            Image image = buttonObj.AddComponent<Image>();
+            image.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
+            Button button = buttonObj.AddComponent<Button>();
+
+            // Create label for button text
+            GameObject labelObj = new GameObject("Label");
+            labelObj.transform.SetParent(buttonObj.transform, false);
+            TextMeshProUGUI label = labelObj.AddComponent<TextMeshProUGUI>();
+            label.text = labelText + ": " + (configEntry.Value ? "ON" : "OFF");
+            label.fontSize = 18;
+            label.alignment = TextAlignmentOptions.Center;
+            label.color = Color.white;
+
+            RectTransform labelRT = label.GetComponent<RectTransform>();
+            labelRT.anchorMin = Vector2.zero;
+            labelRT.anchorMax = Vector2.one;
+            labelRT.offsetMin = Vector2.zero;
+            labelRT.offsetMax = Vector2.zero;
+
+            // Click handler (must come after label is declared)
+            button.onClick.AddListener(() =>
+            {
+                configEntry.Value = !configEntry.Value;
+                Debug.Log($"[{labelText}] toggled to {configEntry.Value}");
+                label.text = labelText + ": " + (configEntry.Value ? "ON" : "OFF");
+            });
+        }
 
     }
 
