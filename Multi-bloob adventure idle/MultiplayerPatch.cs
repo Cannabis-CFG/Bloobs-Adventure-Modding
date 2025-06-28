@@ -5,8 +5,11 @@ using Newtonsoft.Json;
 using Steamworks;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.Remoting.Messaging;
 using System.Threading;
 using System.Threading.Tasks;
+using BepInEx.Configuration;
+using Multi_bloob_adventure_idle;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -22,7 +25,7 @@ namespace Multi_bloob_adventure_idle
 
         private readonly Queue<string> messageQueue = new Queue<string>();
         private readonly object queueLock = new object();
-        Dictionary<string, (int level, int prestige)> playerSkills = new Dictionary<string, (int level, int prestige)>();
+        public static Dictionary<string, (int level, int prestige)> playerSkills = new Dictionary<string, (int level, int prestige)>();
 
         private WebSocket ws;
         private bool isConnected = false;
@@ -31,6 +34,8 @@ namespace Multi_bloob_adventure_idle
         private Coroutine ghostPlayerCoroutine;
         private Coroutine playerLevelCoroutine;
         public static bool isReady = false;
+        public static ConfigEntry<bool> EnableLevelPanel;
+        public static ConfigEntry<bool> EnableGhostSouls;
         private string nameCache;
         private Scene lastScene;
 
@@ -60,17 +65,19 @@ namespace Multi_bloob_adventure_idle
                 }
             };
 
-            ws.ConnectAsync ();
+            ws.ConnectAsync();
             Harmony.CreateAndPatchAll(typeof(CharacterMovement_UpdatePatch));
 
-            if (ws == null) { Debug.Log("WS NULL"); };
+            if (ws == null) { Debug.Log("WS NULL"); }
+            ;
             Debug.Log("Fully woken up");
             lock (players)
             {
                 Debug.Log($"Have dataset: {players}");
             }
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
-            }
+            HandleConfiguration();
+        }
 
         private void OnApplicationQuit()
         {
@@ -119,15 +126,17 @@ namespace Multi_bloob_adventure_idle
                                 {
                                     foreach (var playerData in message.data)
                                     {
-                                        if (playerData.name == SteamClient.Name) break;
-                                        players[playerData.name] = playerData;
-                                        Debug.Log($"Added player {playerData.name} to cached data. Their starting position is {playerData.currentPosition.ToVector3()}");
                                         if (playerData.isDisconnecting)
                                         {
                                             HandleClientDisconnect(playerData.name);
                                             Debug.Log($"Player {playerData.name} has disconnected.");
                                             i++;
+                                            continue;
                                         }
+                                        if (playerData.name == SteamClient.Name) continue;
+                                        players[playerData.name] = playerData;
+                                        Debug.Log($"Added player {playerData.name} to cached data. Their starting position is {playerData.currentPosition.ToVector3()}");
+
                                     }
                                     if (i > 0) Debug.Log($"Detected {i} disconnected clients, removing from game world.");
                                 }
@@ -147,13 +156,16 @@ namespace Multi_bloob_adventure_idle
             { 
             //TODO Handle cleaning up of gameObjects when exiting to main menu and recreating gameObjects re-entering back into the game
 
-            await Task.Delay(TimeSpan.FromSeconds(15));
+            await Task.Delay(TimeSpan.FromSeconds(20));
 
             switch (b.name)
             {
                 case "GameCloud":
                     isReady = true;
                     lastScene = b;
+                    new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
+                    new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
+                    AddsettingOptions();
                     break;
             }
 
@@ -179,8 +191,8 @@ namespace Multi_bloob_adventure_idle
         {
             if (!isReady)
             {
-                Debug.Log("Game not ready, retrying player level update in 10 seconds.");
-                yield return new WaitForSecondsRealtime(10f);
+                Debug.Log("Game not ready, retrying player level update in 30 seconds.");
+                yield return new WaitForSecondsRealtime(30f);
             }
 
             Dictionary<string, string> NameMap = new()
@@ -196,17 +208,7 @@ namespace Multi_bloob_adventure_idle
             foreach (Transform child in player.transform)
             {
                 // Skip irrelevant children
-                if (child.name is null
-                    || child.name == "Weapon Point"
-                    || child.name == "MagicWeapon Point"
-                    || child.name == "RangeWeapon Point"
-                    || child.name == "Melee Weapon"
-                    || child.name == "MeleeWeapon"
-                    || child.name == "MagicProjectile"
-                    || child.name == "RangeProjectile"
-                    || child.name == "wingSlot"
-                    || child.name == "hatSlot"
-                    || child.name == "Canvas")
+                if (child.name is null or "Weapon Point" or "MagicWeapon Point" or "RangeWeapon Point" or "Melee Weapon" or "MeleeWeapon" or "MagicProjectile" or "RangeProjectile" or "wingSlot" or "hatSlot" or "Canvas")
                 {
                     continue; // CUNT
                 }
@@ -347,8 +349,8 @@ namespace Multi_bloob_adventure_idle
                             clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
 
                             // Remove unwanted components and children (same as your existing code)
-                            foreach (var collider in clone.GetComponents<CircleCollider2D>())
-                                Destroy(collider);
+                            //foreach (var collider in clone.GetComponents<CircleCollider2D>())
+                                //Destroy(collider);
                             //Remove Children From BloobCharacter(Player Character) Game Object
                             foreach (Transform child in clone.transform)
                                 if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
@@ -405,7 +407,7 @@ namespace Multi_bloob_adventure_idle
                             text.color = Color.white;
                             Debug.LogWarning("PlayerName Text Created");
                         }
-                        text.text = SteamClient.Name; // set player name text
+                        text.text = nameCache; // set player name text
                     }
                     else
                     {
@@ -429,6 +431,14 @@ namespace Multi_bloob_adventure_idle
                     yield return new WaitForSecondsRealtime(15);
                 }
                 GameObject player = GameObject.Find("BloobCharacter");
+                //Foreach GameOject.Contains("Soul")
+                //Get a list of the names of the souls
+                //Spawn GameObject ("Soul Name")
+                //Add component PetFollow
+                //Change Object.name to Soul Name
+
+                //Might have to cache a soul to get the component
+
 
                 //TODO Pass along live current positioning and hat, wing and color parameters
                 var payload = new
@@ -449,7 +459,8 @@ namespace Multi_bloob_adventure_idle
                         b = player.GetComponent<SpriteRenderer>().color.b,
                         g = player.GetComponent<SpriteRenderer>().color.g,
                         r = player.GetComponent<SpriteRenderer>().color.r
-                    }
+                    },
+                    runSpeed = player.GetComponent<CharacterMovement>().dexteritySkill.runSpeed
 
                 };
 
@@ -463,15 +474,67 @@ namespace Multi_bloob_adventure_idle
                 Debug.Log("Hey shithead");
                 yield return new WaitForSecondsRealtime(30f);
             }
-
         }
+
+
+        private void HandleConfiguration()
+        {
+            EnableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
+                "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
+            EnableGhostSouls = Config.Bind("Visual", "Enable Ghost Souls", true,
+                "Toggles whether or not to see souls that ghost players have equipped");
+        }
+
+        public void AddsettingOptions()
+        {
+            GameObject canvas = GameObject.Find("GameCanvas");
+            if (canvas == null)
+            {
+                Debug.LogError("GameCanvas not found!");
+                return;
+            }
+            Transform t1 = canvas.transform.Find("Player Menu/Bar");
+            if (t1 == null) Debug.LogError("Player Menu not found");
+            
+                else
+                {
+                    Transform t2 = t1.Find("Menu Bar");
+                    if (t2 == null) Debug.LogError("Menu Bar not found");
+                    else
+                    {
+                        Transform t3 = t2.Find("Settings Ui");
+                        if (t3 == null) Debug.LogError("Settings Ui not found");
+                        else Debug.Log("Settings Ui found!");
+                    }
+                }
+        }
+
+            //GameObject SettingsUI = settingsTransform.gameObject;
+            //if (SettingsUI == null) { Debug.Log("Cry"); return; }
+            //foreach (Transform child in SettingsUI.transform)
+            //{
+            //    GameObject childObject = child.gameObject;
+
+            //    if (childObject == null || string.IsNullOrEmpty(childObject.name)) { Debug.Log("Child.Name Null"); continue; }
+            //    Debug.Log(childObject.name);
+
+            //    if (childObject.name == "Sound Off")
+            //    {
+            //        Instantiate(childObject, SettingsUI.transform);
+            //        Debug.Log("Sound Off Button Cloned");
+            //    }
+            //}
+
     }
+
+}
 
     public class PlayerData
     {
         public string name;
         public bool isDisconnecting;
         public Vector3Like currentPosition;
+        public float runSpeed;
         public string hatName;
         public string wingName;
         public ColourLike bloobColour;
@@ -511,11 +574,11 @@ namespace Multi_bloob_adventure_idle
                 // Move to grabbing currentPosition of original clones
                 if (MultiplayerPatchPlugin.players.TryGetValue(playerName, out PlayerData player))
                 {
-                    if (Vector3.Distance(cloneComp.transform.position, player.currentPosition.ToVector3()) >= 500f)
+                    /*if (Vector3.Distance(cloneComp.transform.position, player.currentPosition.ToVector3()) >= 500f)
                     {
                         cloneComp.transform.position.Set(player.currentPosition.x, player.currentPosition.y, player.currentPosition.z);
                         return false;
-                    }
+                    }*/
                     if (cloneComp.lastTargetPosition != player.currentPosition.ToVector3())
                     {
                         __instance.MoveTo(player.currentPosition.ToVector3());
@@ -533,7 +596,7 @@ namespace Multi_bloob_adventure_idle
 
 
 
-    public class IsMultiplayerClone : MonoBehaviour
+public class IsMultiplayerClone : MonoBehaviour
     {
         public Vector3 lastTargetPosition = Vector3.positiveInfinity;
     }
@@ -552,5 +615,12 @@ namespace Multi_bloob_adventure_idle
             transform.rotation = Quaternion.LookRotation(transform.position - Camera.main.transform.position);
         }
     }
-}
 
+
+
+
+/*TODO
+ * 
+ * Add button to settings to disable/enable ghoust souls and level gui
+ *
+ */
