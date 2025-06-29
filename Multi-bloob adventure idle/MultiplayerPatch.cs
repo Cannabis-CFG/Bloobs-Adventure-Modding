@@ -384,15 +384,11 @@ namespace Multi_bloob_adventure_idle
                         }
                         Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
                         //if (kvp.Value.currentPosition.ToVector3() == clone.transform.position) continue;
+                        clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                         if (Vector3.Distance(clone.transform.position, kvp.Value.currentPosition.ToVector3()) >= 750f)
                         {
-                            Debug.Log($"Detected potential different zone for clone from previous dataset, attempting teleport to {kvp.Value.currentPosition.ToVector3()}");
-                            //BUG Doesn't set position properly
-                            clone.GetComponent<CharacterMovement>().StopMoving();
-                            //clone.transform.position = kvp.Value.currentPosition.ToVector3();
-                            clone.GetComponent<CharacterMovement>().Teleport(kvp.Value.currentPosition.ToVector2());
-                            Debug.Log($"Set the clones position to {kvp.Value.currentPosition.ToVector3()}, clones actual current position is {clone.transform.position}");
-                            continue;
+                            Debug.Log($"Detected potential different zone for clone from previous dataset, adjusting movement speed to zip to {kvp.Value.currentPosition.ToVector3()}");
+                            clone.GetComponent<CharacterMovement>().moveSpeed = 400;
                         }
                         Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
                         clone.GetComponent<CharacterMovement>().MoveTo(kvp.Value.currentPosition.ToVector2());
@@ -707,10 +703,6 @@ namespace Multi_bloob_adventure_idle
             var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
             if (cloneComp != null)
             {
-                Debug.LogError($"Currently in cloneComp with name: {cloneComp.name}");
-                var name = cloneComp.name.Replace("BloobClone_", "");
-            cloneComp.GetComponentInParent<CharacterMovement>().Teleport(MultiplayerPatchPlugin.players[name].currentPosition.ToVector2());
-                // Skip original Update for clones
                 return false;
             }
             // Normal Update for local player
