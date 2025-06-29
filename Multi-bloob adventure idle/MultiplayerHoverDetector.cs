@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Windows;
 using Input = UnityEngine.Input;
 
@@ -18,13 +19,17 @@ public class MultiplayerHoverDetector : MonoBehaviour
         if (!MultiplayerPatchPlugin.isReady || cam == null)
             return;
 
-        if (cam == null) cam = Camera.current;
+        if (cam == null) cam = Camera.main;
 
-        Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out RaycastHit hit))
+        Vector3 worldPoint = cam.ScreenToWorldPoint(Input.mousePosition);
+        Vector2 worldPoint2D = new Vector2(worldPoint.x, worldPoint.y);
+
+        RaycastHit2D hit = Physics2D.Raycast(worldPoint2D, Vector2.zero);
+
+        if (hit.collider != null)
         {
-            Debug.Log("Physics raycast has hit something, checking for multiplayer clone comp");
-            var cloneComp = hit.collider?.GetComponent<IsMultiplayerClone>();
+            Debug.Log("Physics2D raycast has hit something, checking for multiplayer clone comp");
+            var cloneComp = hit.collider.GetComponent<IsMultiplayerClone>();
             if (cloneComp != null)
             {
                 string ghostName = hit.collider.gameObject.name.Replace("BloobClone_", "");

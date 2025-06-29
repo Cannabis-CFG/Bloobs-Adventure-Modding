@@ -15,6 +15,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using WebSocketSharp;
+using Object = System.Object;
 
 
 namespace Multi_bloob_adventure_idle
@@ -66,8 +67,9 @@ namespace Multi_bloob_adventure_idle
             };
 
             ws.ConnectAsync();
-            //Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
-
+            Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
+            //Harmony.CreateAndPatchAll(typeof(CharacterMovementTeleportPatch));
+            Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
             if (ws == null) { Debug.Log("WS NULL"); }
             ;
             Debug.Log("Fully woken up");
@@ -319,12 +321,17 @@ namespace Multi_bloob_adventure_idle
                     continue;
                 }
 
+                Debug.Log($"Object name to clone is {original.gameObject.name} Of type {original.GetType()}");
+
                 lock (players)
                 {
                     foreach (var kvp in players)
                     {
                         string playerName = kvp.Key;
-                        Vector3 targetPos = kvp.Value.currentPosition.ToVector3();
+
+                        if (playerName == nameCache) continue;
+
+                        Debug.LogError($"Currently doing shit for {playerName}");
 
                         // Find or create clone for this player
                         GameObject clone = GameObject.Find("BloobClone_" + playerName);
@@ -332,14 +339,16 @@ namespace Multi_bloob_adventure_idle
                         {
 
 
-                            clone = Instantiate(original);
-                            clone.name = "BloobClone_" + playerName;
-                            clone.AddComponent<IsMultiplayerClone>();
-                            clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
+                                clone = Instantiate(original);
+                                clone.name = "BloobClone_" + playerName;
+                                clone.AddComponent<IsMultiplayerClone>();
+                                clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
+                                clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
+                                clone.transform.position = kvp.Value.currentPosition.ToVector3();
 
                             // Remove unwanted components and children (same as your existing code)
-                            //foreach (var collider in clone.GetComponents<CircleCollider2D>())
-                                //Destroy(collider);
+                            foreach (var collider in clone.GetComponents<CircleCollider2D>())
+                                Destroy(collider);
                             //Remove Children From BloobCharacter(Player Character) Game Object
                             foreach (Transform child in clone.transform)
                                 if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
@@ -374,18 +383,19 @@ namespace Multi_bloob_adventure_idle
                             }
                         }
                         Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
-                        if (kvp.Value.currentPosition.ToVector3() == clone.transform.position) continue;
-                        if (Vector2.Distance(new Vector2(clone.transform.position.x, clone.transform.position.y),
-                                new Vector2(kvp.Value.currentPosition.x, kvp.Value.currentPosition.y)) >= 750f)
+                        //if (kvp.Value.currentPosition.ToVector3() == clone.transform.position) continue;
+                        if (Vector3.Distance(clone.transform.position, kvp.Value.currentPosition.ToVector3()) >= 750f)
                         {
                             Debug.Log($"Detected potential different zone for clone from previous dataset, attempting teleport to {kvp.Value.currentPosition.ToVector3()}");
-                            clone.transform.position.Set(kvp.Value.currentPosition.x, kvp.Value.currentPosition.y, kvp.Value.currentPosition.z);
+                            //BUG Doesn't set position properly
+                            clone.GetComponent<CharacterMovement>().StopMoving();
+                            //clone.transform.position = kvp.Value.currentPosition.ToVector3();
+                            clone.GetComponent<CharacterMovement>().Teleport(kvp.Value.currentPosition.ToVector2());
                             Debug.Log($"Set the clones position to {kvp.Value.currentPosition.ToVector3()}, clones actual current position is {clone.transform.position}");
                             continue;
                         }
                         Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
-                        clone.GetComponent<CharacterMovement>()
-                            .MoveTo(new Vector2(kvp.Value.currentPosition.x, kvp.Value.currentPosition.y));
+                        clone.GetComponent<CharacterMovement>().MoveTo(kvp.Value.currentPosition.ToVector2());
 
 
                     }
@@ -418,7 +428,7 @@ namespace Multi_bloob_adventure_idle
                     }
                 }
 
-                yield return new WaitForSeconds(30f);
+                yield return new WaitForSecondsRealtime(30f);
             }
         }
 
@@ -433,16 +443,61 @@ namespace Multi_bloob_adventure_idle
                     Debug.Log("Game not ready, retrying position coroutine in 15 seconds");
                     yield return new WaitForSecondsRealtime(15);
                 }
+                string[] soulData = Array.Empty<string>();
                 GameObject player = GameObject.Find("BloobCharacter");
-                //Foreach GameOject.Contains("Soul")
-                //Get a list of the names of the souls
-                //Spawn GameObject ("Soul Name")
-                //Add component PetFollow
-                //Change Object.name to Soul Name
 
-                //Might have to cache a soul to get the component
+                GameObject[] allObjects = PetManager.Instance.activePets.ToArray();
+
+                foreach (GameObject obj in allObjects)
+                {
+                    soulData.AddToArray(obj.name);
+                }
 
 
+                /*
+                        GameObject soulRef = null;
+                        GameObject[] allObjects = GameObject.FindObjectsOfType<GameObject>();
+
+                        
+                        foreach (GameObject obj in allObjects)
+                        {
+                            if (obj.name.Contains("Soul"))
+                            {
+                                soulRef = obj;
+                                break;  // stops after the first found
+                            }
+                        }
+                        GameObject cloneSoul = Instantiate(soulRef);
+                        GameObject cloneSoul2 = Object.Instantiate<GameObject>("prefablocation", positionV3, Quaternion.identity);
+
+                        // Rename the clone
+                        cloneSoul.name = SoulDataSReseaveSdFromWSS;
+
+                        // Get the PetFollow component from the clone
+                        PetFollow petFollow = cloneSoul.GetComponent<PetFollow>();
+
+                        if (petFollow != null)
+                        {
+                            petFollow.Object.name = cloneSoul.name;
+
+                            Sprite newSprite = Resources.Load<Sprite>(cloneSoul.name);
+
+                            if (newSprite != null)
+                            {
+                                petFollow.spriteRenderer.sprite = newSprite;
+                            }
+                            else
+                            {
+                                Debug.LogWarning("Sprite not found for name: " + cloneSoul.name);
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogWarning("PetFollow component not found on cloneSoul");
+                        }
+                */
+
+                
                 //TODO Pass along live current positioning and hat, wing and color parameters
                 var payload = new
                 {
@@ -463,7 +518,8 @@ namespace Multi_bloob_adventure_idle
                         g = player.GetComponent<SpriteRenderer>().color.g,
                         r = player.GetComponent<SpriteRenderer>().color.r
                     },
-                    runSpeed = player.GetComponent<CharacterMovement>().dexteritySkill.runSpeed
+                    runSpeed = player.GetComponent<CharacterMovement>().dexteritySkill.runSpeed,
+                    cloneData = soulData
 
                 };
 
@@ -602,6 +658,7 @@ namespace Multi_bloob_adventure_idle
         public string wingName;
         public ColourLike bloobColour;
         public Dictionary<string, (int level, int prestige)> skillData;
+        public string[] soulData;
     }
 
     public class Vector3Like
@@ -611,6 +668,7 @@ namespace Multi_bloob_adventure_idle
         public float z;
 
         public Vector3 ToVector3() => new Vector3(x, y, z);
+        public Vector2 ToVector2() => new Vector2(x, y);
     }
 
     public class ColourLike
@@ -624,9 +682,43 @@ namespace Multi_bloob_adventure_idle
     }
 
 
+    [HarmonyPatch(typeof(CharacterMovement), "Teleport")]
+    public class CharacterMovementTeleportPatch
+    {
+        static bool Prefix(CharacterMovement __instance)
+        {
+            var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+            {
+                // Skip original Update for clones
+                return false;
+            }
+            // Normal Update for local player
+            return true;
+        }
+    }
 
-    /*
-    [HarmonyPatch(typeof(CharacterMovement), "Update")]
+    //TODO Test to see if patch works
+    [HarmonyPatch(typeof(TeleportScript), "OnTriggerEnter2D")]
+    public class TeleportScriptTeleportPatch
+    {
+        static bool Prefix(TeleportScript __instance)
+        {
+            var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+            {
+                Debug.LogError($"Currently in cloneComp with name: {cloneComp.name}");
+                var name = cloneComp.name.Replace("BloobClone_", "");
+            cloneComp.GetComponentInParent<CharacterMovement>().Teleport(MultiplayerPatchPlugin.players[name].currentPosition.ToVector2());
+                // Skip original Update for clones
+                return false;
+            }
+            // Normal Update for local player
+            return true;
+        }
+    }
+
+[HarmonyPatch(typeof(CharacterMovement), "Update")]
     public class CharacterMovementUpdatePatch
     {
         static bool Prefix(CharacterMovement __instance)
@@ -634,7 +726,7 @@ namespace Multi_bloob_adventure_idle
             var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
             if (cloneComp != null)
             {
-                string playerName = __instance.gameObject.name.Replace("BloobClone_", "");
+                /*string playerName = __instance.gameObject.name.Replace("BloobClone_", "");
                 // Move to grabbing currentPosition of original clones
                 if (MultiplayerPatchPlugin.players.TryGetValue(playerName, out PlayerData player))
                 {
@@ -648,7 +740,7 @@ namespace Multi_bloob_adventure_idle
                         __instance.MoveTo(player.currentPosition.ToVector3());
                         cloneComp.lastTargetPosition = player.currentPosition.ToVector3();
                     }
-                }
+                }*/
                 // Skip original Update for clones
                 return false;
             }
@@ -657,7 +749,6 @@ namespace Multi_bloob_adventure_idle
             return true;
         }
     }
-    */
 
 
 
