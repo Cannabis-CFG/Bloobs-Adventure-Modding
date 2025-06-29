@@ -1,3 +1,4 @@
+ - # This marks your game as modded
  - # This is an example mod and not intended for live use
    ## This breaks the balance of the game
    ## This will potentially ruin the fun of the game for yourself
