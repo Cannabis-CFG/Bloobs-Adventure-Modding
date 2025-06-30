@@ -5,17 +5,13 @@ using Newtonsoft.Json;
 using Steamworks;
 using System.Collections;
 using System.Collections.Generic;
-using System.Runtime.Remoting.Messaging;
-using System.Threading;
 using System.Threading.Tasks;
 using BepInEx.Configuration;
-using Multi_bloob_adventure_idle;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using WebSocketSharp;
-using Object = System.Object;
 
 
 namespace Multi_bloob_adventure_idle
@@ -96,9 +92,7 @@ namespace Multi_bloob_adventure_idle
 
         private void Start()
         {
-            positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
-            ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
-            playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
+            // Moved to OnActiveSceneChanged
         }
 
         private void Update()
@@ -154,18 +148,28 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
-        public async void OnActiveSceneChanged(Scene a, Scene b)
+        public async void OnActiveSceneChanged(Scene current, Scene next)
             { 
             // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
-            await Task.Delay(TimeSpan.FromSeconds(20));
+            //await Task.Delay(TimeSpan.FromSeconds(20));
 
-            switch (b.name)
+            switch (next.name)
             {
                 case "GameCloud":
+                    // We check if Steam has initialized, if it hasn't in time we wait 5 seconds and try again. Ensuring no issues on timings
+                    if (!SteamClient.IsValid)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(5));
+                        OnActiveSceneChanged(current, next);
+                        return;
+                    }
                     isReady = true;
-                    lastScene = b; // Cache latest scene change to handle main menu changes
+                    lastScene = next; // Cache latest scene change to handle main menu changes
                     new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
                     new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
+                    positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
+                    ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
+                    playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
                     AddsettingOptions();
                     break;
             }
@@ -342,6 +346,8 @@ namespace Multi_bloob_adventure_idle
                                 clone = Instantiate(original);
                                 clone.name = "BloobClone_" + playerName;
                                 clone.AddComponent<IsMultiplayerClone>();
+                                clone.AddComponent<Collider2D>();
+                                Collider2D test = clone.GetComponent<Collider2D>();
                                 clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
                                 clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                                 clone.transform.position = kvp.Value.currentPosition.ToVector3();
