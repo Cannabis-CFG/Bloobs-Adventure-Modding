@@ -1,4 +1,3 @@
-
  - # This marks your game as modded
    ## This may potentially ruin the fun of the game for yourself
    ## This may cause unintended issues. Including but not limited to; low frames, stutters, incorrect movement and crashes.
@@ -15,7 +14,8 @@ The **Multi-blood Adventure Idle** mod adds basic multiplayer synchronization to
     
 -   **Receive updates** about other connected players and display their ghosts in your world.
     
--   **Render nameplates**, skill levels, and equipped souls for yourself and each ghost.
+-   **Render nameplates**, skill levels and names for each ghost.
+	- Currently broken and in testing.
     
 
 This enables multiple players to see each other moving, leveling, but not interact with each other (due to limitations with how the game is designed, it wasn't meant to be multiplayer after all).
