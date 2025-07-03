@@ -36,6 +36,9 @@ namespace Multi_bloob_adventure_idle
         private string nameCache;
         private Scene lastScene;
 
+        public static MultiplayerPatchPlugin instance;
+
+
         public static readonly Dictionary<string, PlayerData> players = new Dictionary<string, PlayerData>();
 
         private void Awake()
@@ -75,6 +78,7 @@ namespace Multi_bloob_adventure_idle
             }
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
             HandleConfiguration();
+            instance ??= this;
         }
 
         private void OnApplicationQuit()
@@ -151,7 +155,7 @@ namespace Multi_bloob_adventure_idle
         public async void OnActiveSceneChanged(Scene current, Scene next)
             { 
             // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
-            //await Task.Delay(TimeSpan.FromSeconds(20));
+            await Task.Delay(TimeSpan.FromSeconds(7));
 
             switch (next.name)
             {
@@ -167,9 +171,9 @@ namespace Multi_bloob_adventure_idle
                     lastScene = next; // Cache latest scene change to handle main menu changes
                     new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
                     new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
-                    positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
                     ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
                     playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
+                    positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
                     AddsettingOptions();
                     break;
             }
@@ -346,8 +350,6 @@ namespace Multi_bloob_adventure_idle
                                 clone = Instantiate(original);
                                 clone.name = "BloobClone_" + playerName;
                                 clone.AddComponent<IsMultiplayerClone>();
-                                clone.AddComponent<Collider2D>();
-                                Collider2D test = clone.GetComponent<Collider2D>();
                                 clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
                                 clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                                 clone.transform.position = kvp.Value.currentPosition.ToVector3();
@@ -359,6 +361,7 @@ namespace Multi_bloob_adventure_idle
                             foreach (Transform child in clone.transform)
                                 if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
                                     Destroy(child.gameObject);
+
 
 
                             // Setup UI Text with playerName
@@ -389,7 +392,11 @@ namespace Multi_bloob_adventure_idle
                             }
                         }
                         Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
-                        //if (kvp.Value.currentPosition.ToVector3() == clone.transform.position) continue;
+                        if (kvp.Value.currentPosition.ToVector3() == clone.transform.position)
+                        {
+                            Debug.Log("Position is the same, skipping");
+                            continue;
+                        }
                         clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                         if (Vector3.Distance(clone.transform.position, kvp.Value.currentPosition.ToVector3()) >= 750f)
                         {
@@ -430,7 +437,7 @@ namespace Multi_bloob_adventure_idle
                     }
                 }
 
-                yield return new WaitForSecondsRealtime(30f);
+                yield return new WaitForSecondsRealtime(3f);
             }
         }
 
@@ -448,12 +455,12 @@ namespace Multi_bloob_adventure_idle
                 string[] soulData = Array.Empty<string>();
                 GameObject player = GameObject.Find("BloobCharacter");
 
-                GameObject[] allObjects = PetManager.Instance.activePets.ToArray();
+                //GameObject[] allObjects = PetManager.Instance.activePets.ToArray();
 
-                foreach (GameObject obj in allObjects)
+                /*foreach (GameObject obj in allObjects)
                 {
                     soulData.AddToArray(obj.name);
-                }
+                }*/
 
 
                 /*
@@ -520,7 +527,7 @@ namespace Multi_bloob_adventure_idle
                         g = player.GetComponent<SpriteRenderer>().color.g,
                         r = player.GetComponent<SpriteRenderer>().color.r
                     },
-                    runSpeed = player.GetComponent<CharacterMovement>().dexteritySkill.runSpeed,
+                    runSpeed = player.GetComponent<CharacterMovement>()?.dexteritySkill.runSpeed,
                     cloneData = soulData
 
                 };
@@ -533,7 +540,7 @@ namespace Multi_bloob_adventure_idle
 
                 
                 Debug.Log("Hey shithead");
-                yield return new WaitForSecondsRealtime(30f);
+                yield return new WaitForSecondsRealtime(3f);
             }
         }
 
