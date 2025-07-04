@@ -81,13 +81,131 @@ Example:
 
   
 
-```ini
+```cfg
 
 [Visual]
 
-# Toggle hover‐panel showing player levels
-Enable Level Panel? = true
+## Hover panel width
+# Setting type: Int32
+# Default value: 300
+Panel Width = 150
 
+## Hover panel height
+# Setting type: Int32
+# Default value: 150
+Panel Height = 75
+
+## Hover panel vertical offset
+# Setting type: Int32
+# Default value: -100
+Panel Pos Y = 100
+
+## Background R 0–255
+# Setting type: Int32
+# Default value: 30
+Panel Color R = 30
+
+## Background G 0–255
+# Setting type: Int32
+# Default value: 30
+Panel Color G = 30
+
+## Background B 0–255
+# Setting type: Int32
+# Default value: 30
+Panel Color B = 30
+
+## Background opacity 0–1
+# Setting type: Single
+# Default value: 0.7
+Panel Alpha = 0.4
+
+## Enable panel drop shadow
+# Setting type: Boolean
+# Default value: true
+Shadow Enabled = false
+
+## Shadow color R 0–255
+# Setting type: Int32
+# Default value: 0
+Shadow Color R = 0
+
+## Shadow color G 0–255
+# Setting type: Int32
+# Default value: 0
+Shadow Color G = 0
+
+## Shadow color B 0–255
+# Setting type: Int32
+# Default value: 0
+Shadow Color B = 0
+
+## Shadow opacity 0–1
+# Setting type: Single
+# Default value: 0.5
+Shadow Alpha = 0.5
+
+## Shadow horizontal offset
+# Setting type: Int32
+# Default value: 4
+Shadow Offset X = 4
+
+## Shadow vertical offset
+# Setting type: Int32
+# Default value: -4
+Shadow Offset Y = -4
+
+## Hover text font size
+# Setting type: Int32
+# Default value: 14
+Font Size = 8
+
+## Text color R 0–255
+# Setting type: Int32
+# Default value: 240
+Text Color R = 240
+
+## Text color G 0–255
+# Setting type: Int32
+# Default value: 240
+Text Color G = 240
+
+## Text color B 0–255
+# Setting type: Int32
+# Default value: 240
+Text Color B = 240
+
+## Text opacity 0–1
+# Setting type: Single
+# Default value: 1
+Text Alpha = 1
+
+## Text margin left
+# Setting type: Int32
+# Default value: 8
+Margin Left = 8
+
+## Text margin top
+# Setting type: Int32
+# Default value: 8
+Margin Top = 8
+
+## Text margin right
+# Setting type: Int32
+# Default value: 8
+Margin Right = 8
+
+## Text margin bottom
+# Setting type: Int32
+# Default value: 8
+Margin Bottom = 8
+
+[Visual]
+
+## Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost
+# Setting type: Boolean
+# Default value: true
+Enable Level Panel? = true
 
 ```
 
