@@ -15,7 +15,6 @@ The **Multi-blood Adventure Idle** mod adds basic multiplayer synchronization to
 -   **Receive updates** about other connected players and display their ghosts in your world.
     
 -   **Render nameplates**, skill levels and names for each ghost.
-	- Currently broken and in testing.
     
 
 This enables multiple players to see each other moving, leveling, but not interact with each other (due to limitations with how the game is designed, it wasn't meant to be multiplayer after all).
@@ -32,14 +31,13 @@ This enables multiple players to see each other moving, leveling, but not intera
     
 -   **Skill & Prestige Panel**  
     Gathers your skill levels and prestige from in‑scene components and optionally displays a floating panel when hovering your mouse over ghosts.
-    - Currently broken and in testing.
     
 -   **Ghost Cosmetic Display**  
     Sends and renders equipped hat and wings on both local and ghost characters.
+    - Not currently written and nonfunctional.
     
 -   **Hover UI Integration**  
     Custom UI framework to build mouse-over tooltips
-    -	Currently broken and in testing.
     
     
 
@@ -49,7 +47,7 @@ This enables multiple players to see each other moving, leveling, but not intera
 
 -   [BepInEx](https://github.com/BepInEx/BepInEx)
     
--   [WebSocketSharp](https://github.com/sta/websocket-sharp) (This goes within `<GameFolder>/Bloobs Adventure Idle_Data/Managed`)
+-   [WebSocketSharp](https://sta.github.io/websocket-sharp/) (This goes within `<GameFolder>/Bloobs Adventure Idle_Data/Managed`)
 
     
    ### Optional Dependency
@@ -101,14 +99,14 @@ Save and restart to apply.
 
 ### Usage
 
-1.  **Connect** – When you hit the main menu, enter your save moderately fast. Timings for grabbing data have yet to be properly refined
+1.  **Connect** – Load your save, the mod will handle the rest.
     
 2.  **Spawn Ghosts** – Other connected players appear as color ­tinted clones that move and animate in real time.
     
-3.  ~~**Inspect** – Hover your mouse over a ghost to see their level panel (if enabled).~~*
+3.  **Inspect** – Hover your mouse over a ghost to see their level panel (if enabled).
     
 4.  **Enjoy** – Observe fellow adventurers sharing the same idle world.
     
-*= Currently broken and in testing.
 
-Happy adventuring with friends—without leaving your single‑player realm!
+
+Happy adventuring with friends, without leaving your single‑player realm!
