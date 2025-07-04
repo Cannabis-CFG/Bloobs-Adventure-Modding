@@ -5,8 +5,10 @@ using Newtonsoft.Json;
 using Steamworks;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using BepInEx.Configuration;
+using Newtonsoft.Json.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -35,6 +37,7 @@ namespace Multi_bloob_adventure_idle
         public static ConfigEntry<bool> EnableGhostSouls;
         private string nameCache;
         private Scene lastScene;
+        private JObject lastPayload = null;
 
         public static MultiplayerPatchPlugin instance;
 
@@ -101,8 +104,8 @@ namespace Multi_bloob_adventure_idle
 
         private void Update()
         {
-            if (!isReady || !SteamClient.IsValid) return;
-            GameObject player = GameObject.Find("BloobCharacter");
+            if (!isReady || !SteamClient.IsValid)
+                return;
             if (nameCache.IsNullOrEmpty()) nameCache = SteamClient.Name;
 
             lock (queueLock)
@@ -111,42 +114,98 @@ namespace Multi_bloob_adventure_idle
                 {
                     string json = messageQueue.Dequeue();
                     Debug.Log("Got message from WS: " + json);
+
+                    JObject msg;
                     try
                     {
-                        var message = JsonConvert.DeserializeObject<WebSocketMessage>(json);
-                        //TODO Switch message?.type
-                        //TODO Add closing type to handle removing of closing clients
-                        if (message.data == null) return;
+                        msg = JObject.Parse(json);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError("Invalid JSON: " + ex);
+                        continue;
+                    }
 
-                        switch (message?.type)
+                    string type = msg["type"]?.ToString();
+                    if (type == null) continue;
+
+                    lock (players)
+                    {
+                        switch (type)
                         {
-                            case "allData":
-                                int i = 0;
-                                lock (players)
+                            // 1) Full snapshot on connect
+                            case "initialState":
+                                foreach (var token in (JArray)msg["data"])
                                 {
-                                    foreach (var playerData in message.data)
-                                    {
-                                        if (playerData.isDisconnecting)
-                                        {
-                                            HandleClientDisconnect(playerData.name);
-                                            Debug.Log($"Player {playerData.name} has disconnected.");
-                                            i++;
-                                            continue;
-                                        }
-                                        if (playerData.name == SteamClient.Name) continue;
-                                        players[playerData.name] = playerData;
-                                        Debug.Log($"Added player {playerData.name} to cached data. Their starting position is {playerData.currentPosition.ToVector3()}");
+                                    var pd = token.ToObject<PlayerData>();
+                                    if (pd.name == SteamClient.Name) continue;
 
+                                    players[pd.name] = pd;
+                                    // your existing routine will spawn/update clones next tick
+                                }
+                                break;
+
+                            // 2) A brand-new player joined
+                            case "newPlayer":
+                                {
+                                    var pd = msg["data"].ToObject<PlayerData>();
+                                    if (pd.name != SteamClient.Name)
+                                        players[pd.name] = pd;
+                                }
+                                break;
+
+                            // 3) Incremental update for one player
+                            case "update":
+                                {
+                                    string name = msg["name"]?.ToString();
+                                    if (string.IsNullOrEmpty(name) || name == SteamClient.Name)
+                                        break;
+
+                                    if (players.TryGetValue(name, out var existing))
+                                    {
+                                        // apply each changed top-level field
+                                        foreach (var prop in msg.Properties())
+                                        {
+                                            switch (prop.Name)
+                                            {
+                                                case "currentPosition":
+                                                    existing.currentPosition = prop.Value
+                                                        .ToObject<Vector3Like>();
+                                                    break;
+                                                case "runSpeed":
+                                                    existing.runSpeed = prop.Value
+                                                        .ToObject<float>();
+                                                    break;
+                                                case "cloneData":
+                                                    existing.soulData = prop.Value
+                                                        .ToObject<string[]>();
+                                                    break;
+                                                case "bloobColour":
+                                                    existing.bloobColour = prop.Value
+                                                        .ToObject<ColourLike>();
+                                                    break;
+                                                case "skillData":
+                                                    existing.skillData = prop.Value
+                                                        .ToObject<Dictionary<string, (int level, int prestige)>>();
+                                                    break;
+                                                    // add other cases here as needed…
+                                            }
+                                        }
+                                        // store it back
+                                        players[name] = existing;
                                     }
-                                    if (i > 0) Debug.Log($"Detected {i} disconnected clients, removing from game world.");
+                                }
+                                break;
+
+                            // 4) A player disconnected
+                            case "disconnect":
+                                {
+                                    string name = msg["name"]?.ToString();
+                                    if (!string.IsNullOrEmpty(name))
+                                        HandleClientDisconnect(name);
                                 }
                                 break;
                         }
-
-                    }
-                    catch (System.Exception ex)
-                    {
-                        Debug.LogError("Failed to handle WS message: " + ex);
                     }
                 }
             }
@@ -329,7 +388,7 @@ namespace Multi_bloob_adventure_idle
                     continue;
                 }
 
-                Debug.Log($"Object name to clone is {original.gameObject.name} Of type {original.GetType()}");
+                //Debug.Log($"Object name to clone is {original.gameObject.name} Of type {original.GetType()}");
 
                 lock (players)
                 {
@@ -339,7 +398,7 @@ namespace Multi_bloob_adventure_idle
 
                         if (playerName == nameCache) continue;
 
-                        Debug.LogError($"Currently doing shit for {playerName}");
+                        //Debug.LogError($"Currently doing shit for {playerName}");
 
                         // Find or create clone for this player
                         GameObject clone = GameObject.Find("BloobClone_" + playerName);
@@ -347,12 +406,12 @@ namespace Multi_bloob_adventure_idle
                         {
 
 
-                                clone = Instantiate(original);
-                                clone.name = "BloobClone_" + playerName;
-                                clone.AddComponent<IsMultiplayerClone>();
-                                clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
-                                clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
-                                clone.transform.position = kvp.Value.currentPosition.ToVector3();
+                            clone = Instantiate(original);
+                            clone.name = "BloobClone_" + playerName;
+                            clone.AddComponent<IsMultiplayerClone>();
+                            clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
+                            clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
+                            clone.transform.position = kvp.Value.currentPosition.ToVector3();
 
                             // Remove unwanted components and children (same as your existing code)
                             foreach (var collider in clone.GetComponents<CircleCollider2D>())
@@ -391,19 +450,19 @@ namespace Multi_bloob_adventure_idle
                                 Debug.LogWarning("No Canvas found in BloobClone.");
                             }
                         }
-                        Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
+                        //Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
                         if (kvp.Value.currentPosition.ToVector3() == clone.transform.position)
                         {
-                            Debug.Log("Position is the same, skipping");
+                            //Debug.Log("Position is the same, skipping");
                             continue;
                         }
                         clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                         if (Vector3.Distance(clone.transform.position, kvp.Value.currentPosition.ToVector3()) >= 750f)
                         {
-                            Debug.Log($"Detected potential different zone for clone from previous dataset, adjusting movement speed to zip to {kvp.Value.currentPosition.ToVector3()}");
+                            //Debug.Log($"Detected potential different zone for clone from previous dataset, adjusting movement speed to zip to {kvp.Value.currentPosition.ToVector3()}");
                             clone.GetComponent<CharacterMovement>().moveSpeed = 400;
                         }
-                        Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
+                        //Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
                         clone.GetComponent<CharacterMovement>().MoveTo(kvp.Value.currentPosition.ToVector2());
 
 
@@ -452,61 +511,8 @@ namespace Multi_bloob_adventure_idle
                     Debug.Log("Game not ready, retrying position coroutine in 15 seconds");
                     yield return new WaitForSecondsRealtime(15);
                 }
-                string[] soulData = Array.Empty<string>();
                 GameObject player = GameObject.Find("BloobCharacter");
-
-                //GameObject[] allObjects = PetManager.Instance.activePets.ToArray();
-
-                /*foreach (GameObject obj in allObjects)
-                {
-                    soulData.AddToArray(obj.name);
-                }*/
-
-
-                /*
-                        GameObject soulRef = null;
-                        GameObject[] allObjects = GameObject.FindObjectsOfType<GameObject>();
-
-                        
-                        foreach (GameObject obj in allObjects)
-                        {
-                            if (obj.name.Contains("Soul"))
-                            {
-                                soulRef = obj;
-                                break;  // stops after the first found
-                            }
-                        }
-                        GameObject cloneSoul = Instantiate(soulRef);
-                        GameObject cloneSoul2 = Object.Instantiate<GameObject>("prefablocation", positionV3, Quaternion.identity);
-
-                        // Rename the clone
-                        cloneSoul.name = SoulDataSReseaveSdFromWSS;
-
-                        // Get the PetFollow component from the clone
-                        PetFollow petFollow = cloneSoul.GetComponent<PetFollow>();
-
-                        if (petFollow != null)
-                        {
-                            petFollow.Object.name = cloneSoul.name;
-
-                            Sprite newSprite = Resources.Load<Sprite>(cloneSoul.name);
-
-                            if (newSprite != null)
-                            {
-                                petFollow.spriteRenderer.sprite = newSprite;
-                            }
-                            else
-                            {
-                                Debug.LogWarning("Sprite not found for name: " + cloneSoul.name);
-                            }
-                        }
-                        else
-                        {
-                            Debug.LogWarning("PetFollow component not found on cloneSoul");
-                        }
-                */
-
-                
+                string[] soulData = Array.Empty<string>();
                 //TODO Pass along live current positioning and hat, wing and color parameters
                 var payload = new
                 {
@@ -529,18 +535,38 @@ namespace Multi_bloob_adventure_idle
                     },
                     runSpeed = player.GetComponent<CharacterMovement>()?.dexteritySkill.runSpeed,
                     cloneData = soulData
-
                 };
 
-                string json = JsonConvert.SerializeObject(payload);
+                JObject newPayload = JObject.FromObject(payload);
 
+                var diffPayload = new JObject
+                {
+                    ["name"] = newPayload["name"]
+                };
+
+                foreach (var property in newPayload.Properties())
+                {
+                    if (property.Name == "name") continue;
+                    if (lastPayload == null || !JToken.DeepEquals(property.Value, lastPayload[property.Name]))
+                    {
+                        diffPayload[property.Name] = property.Value;
+                    }
+                }
+
+                if (diffPayload.Properties().Count() > 1)
+                {
+                    string jsonPayload = diffPayload.ToString(Formatting.None);
+                    Debug.Log($"Sending data: {jsonPayload} to server");
+                    ws.Send(jsonPayload);
+                    lastPayload = newPayload;
+                }
+
+
+                /*string json = JsonConvert.SerializeObject(payload);
                 Debug.Log($"Sending data: {json} to server");
-
                 ws.Send(json);
-
-                
-                Debug.Log("Hey shithead");
-                yield return new WaitForSecondsRealtime(3f);
+                Debug.Log("Hey shithead");*/
+                yield return new WaitForSecondsRealtime(5f);
             }
         }
 
