@@ -25,10 +25,9 @@ public class MultiplayerHoverDetector : MonoBehaviour
 
     void Update()
     {
-        if (!MultiplayerPatchPlugin.isReady || cam == null)
+        if (!MultiplayerPatchPlugin.isReady || cam == null || !MultiplayerPatchPlugin.EnableLevelPanel.Value)
             return;
         Vector3 worldPoint = cam.ScreenToWorldPoint(Input.mousePosition);
-        //Vector2 worldPoint2D = new Vector2(worldPoint.x, worldPoint.y);
 
         foreach (var cloneComp in GameObject.FindObjectsOfType<IsMultiplayerClone>())
         {
@@ -56,9 +55,8 @@ public class MultiplayerHoverDetector : MonoBehaviour
     private string BuildHoverInfo(string playerName, PlayerData data)
     {
         var columnWidth = 20;
-        // 1) Pull out skill entries and sort
         var sorted = data.skillData
-            .Where(kv => kv.Value.level >= 0)   // filter out any invalid entries
+            .Where(kv => kv.Value.level >= 0)
             .OrderByDescending(kv => kv.Value.prestige)
             .ThenByDescending(kv => kv.Value.level)
             .Select(kv =>
@@ -66,20 +64,17 @@ public class MultiplayerHoverDetector : MonoBehaviour
                 string name = kv.Key;
                 int lvl = kv.Value.level;
                 int pres = kv.Value.prestige;
-                // 2) Format “SkillName Lvl X (P Y)” but drop prestige if zero
                 return pres > 0
                     ? $"{name} Lvl {lvl} (P {pres})"
                     : $"{name} Lvl {lvl}";
             })
             .ToList();
 
-        // 3) Build lines with up to two entries per line
         var lines = new List<string>();
         for (int i = 0; i < sorted.Count; i += 2)
         {
             if (i + 1 < sorted.Count)
             {
-                // two on one line, padded to 'columnWidth' characters
                 lines.Add(string.Format(
                     $"{{0,-{columnWidth}}}    {{1}}",
                     sorted[i],
@@ -88,15 +83,10 @@ public class MultiplayerHoverDetector : MonoBehaviour
             }
             else
             {
-                // last odd entry alone
                 lines.Add(sorted[i]);
             }
         }
-
-        // 4) Prepend player name or header if you like
         lines.Insert(0, $"<b>{playerName}</b>");
-
-        // 5) Join into one string with newlines
         return string.Join("\n", lines);
     }
 }

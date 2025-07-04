@@ -34,7 +34,7 @@ namespace Multi_bloob_adventure_idle
         private Coroutine playerLevelCoroutine;
         public static bool isReady = false;
         public static ConfigEntry<bool> EnableLevelPanel;
-        public static ConfigEntry<bool> EnableGhostSouls;
+        //public static ConfigEntry<bool> EnableGhostSouls;
         private string nameCache;
         private Scene lastScene;
         private JObject lastPayload = null;
@@ -70,7 +70,7 @@ namespace Multi_bloob_adventure_idle
 
             ws.ConnectAsync();
             Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
-            //Harmony.CreateAndPatchAll(typeof(CharacterMovementTeleportPatch));
+            Harmony.CreateAndPatchAll(typeof(CharacterMovementCloseAllShopsPatch));
             Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
             if (ws == null) { Debug.Log("WS NULL"); }
             ;
@@ -113,7 +113,7 @@ namespace Multi_bloob_adventure_idle
                 while (messageQueue.Count > 0)
                 {
                     string json = messageQueue.Dequeue();
-                    Debug.Log("Got message from WS: " + json);
+                    //Debug.Log("Got message from WS: " + json);
 
                     JObject msg;
                     try
@@ -133,7 +133,6 @@ namespace Multi_bloob_adventure_idle
                     {
                         switch (type)
                         {
-                            // 1) Full snapshot on connect
                             case "initialState":
                                 foreach (var token in (JArray)msg["data"])
                                 {
@@ -141,11 +140,8 @@ namespace Multi_bloob_adventure_idle
                                     if (pd.name == SteamClient.Name) continue;
 
                                     players[pd.name] = pd;
-                                    // your existing routine will spawn/update clones next tick
                                 }
                                 break;
-
-                            // 2) A brand-new player joined
                             case "newPlayer":
                                 {
                                     var pd = msg["data"].ToObject<PlayerData>();
@@ -153,8 +149,6 @@ namespace Multi_bloob_adventure_idle
                                         players[pd.name] = pd;
                                 }
                                 break;
-
-                            // 3) Incremental update for one player
                             case "update":
                                 {
                                     string name = msg["name"]?.ToString();
@@ -163,7 +157,6 @@ namespace Multi_bloob_adventure_idle
 
                                     if (players.TryGetValue(name, out var existing))
                                     {
-                                        // apply each changed top-level field
                                         foreach (var prop in msg.Properties())
                                         {
                                             switch (prop.Name)
@@ -188,16 +181,12 @@ namespace Multi_bloob_adventure_idle
                                                     existing.skillData = prop.Value
                                                         .ToObject<Dictionary<string, (int level, int prestige)>>();
                                                     break;
-                                                    // add other cases here as needed…
                                             }
                                         }
-                                        // store it back
                                         players[name] = existing;
                                     }
                                 }
                                 break;
-
-                            // 4) A player disconnected
                             case "disconnect":
                                 {
                                     string name = msg["name"]?.ToString();
@@ -218,6 +207,7 @@ namespace Multi_bloob_adventure_idle
 
             switch (next.name)
             {
+                //TODO Handle main menu case, prevents crashes
                 case "GameCloud":
                     // We check if Steam has initialized, if it hasn't in time we wait 5 seconds and try again. Ensuring no issues on timings
                     if (!SteamClient.IsValid)
@@ -244,7 +234,10 @@ namespace Multi_bloob_adventure_idle
             var clone = GameObject.Find($"BloobClone_{name}");
             if (clone == null) return;
             GameObject.DestroyImmediate(clone);
-            players.Remove(name);
+            lock (players)
+            {
+                players.Remove(name);
+            }
         }
 
 
@@ -341,11 +334,11 @@ namespace Multi_bloob_adventure_idle
                 int prestige = GetIntField(skillComponent, prestigeFieldName);
 
                 skillData[childName] = (level, prestige);
-                Debug.Log($"[Skill] {childName}: Level={level} Prestige={prestige}");
+                //Debug.Log($"[Skill] {childName}: Level={level} Prestige={prestige}");
             }
 
             playerSkills = skillData;
-            yield return new WaitForSecondsRealtime(600f);
+            yield return new WaitForSecondsRealtime(60f);
         }
 
         int GetIntField(Component comp, string fieldName)
@@ -486,7 +479,7 @@ namespace Multi_bloob_adventure_idle
                             text.fontSize = 24;
                             text.alignment = TextAlignmentOptions.Center;
                             text.color = Color.white;
-                            Debug.LogWarning("PlayerName Text Created");
+                            //Debug.LogWarning("PlayerName Text Created");
                         }
                         text.text = nameCache; // set player name text
                     }
@@ -496,7 +489,7 @@ namespace Multi_bloob_adventure_idle
                     }
                 }
 
-                yield return new WaitForSecondsRealtime(3f);
+                yield return new WaitForSecondsRealtime(1f);
             }
         }
 
@@ -513,7 +506,7 @@ namespace Multi_bloob_adventure_idle
                 }
                 GameObject player = GameObject.Find("BloobCharacter");
                 string[] soulData = Array.Empty<string>();
-                //TODO Pass along live current positioning and hat, wing and color parameters
+
                 var payload = new
                 {
                     name = SteamClient.Name,
@@ -555,8 +548,9 @@ namespace Multi_bloob_adventure_idle
 
                 if (diffPayload.Properties().Count() > 1)
                 {
+                    //TODO Send through Binary serialization, decreases payload and faster to de/serialize
                     string jsonPayload = diffPayload.ToString(Formatting.None);
-                    Debug.Log($"Sending data: {jsonPayload} to server");
+                    //Debug.Log($"Sending data: {jsonPayload} to server");
                     ws.Send(jsonPayload);
                     lastPayload = newPayload;
                 }
@@ -566,7 +560,7 @@ namespace Multi_bloob_adventure_idle
                 Debug.Log($"Sending data: {json} to server");
                 ws.Send(json);
                 Debug.Log("Hey shithead");*/
-                yield return new WaitForSecondsRealtime(5f);
+                yield return new WaitForSecondsRealtime(1f);
             }
         }
 
@@ -575,8 +569,8 @@ namespace Multi_bloob_adventure_idle
         {
             EnableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
                 "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
-            EnableGhostSouls = Config.Bind("Visual", "Enable Ghost Souls", true,
-                "Toggles whether or not to see souls that ghost players have equipped");
+            //EnableGhostSouls = Config.Bind("Visual", "Enable Ghost Souls", true,
+                //"Toggles whether or not to see souls that ghost players have equipped");
         }
 
         public void AddsettingOptions()
@@ -634,8 +628,8 @@ namespace Multi_bloob_adventure_idle
             Debug.Log("Sound Off Found");
 
             // Add toggles
-            AddButton(settingsUi, "Enable Ghost Souls", EnableGhostSouls, new Vector2(150, 160));
-            AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 115));
+            //AddButton(settingsUi, "Enable Ghost Souls", EnableGhostSouls, new Vector2(150, 160));
+            AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 120));
 
         }
 
@@ -717,23 +711,6 @@ namespace Multi_bloob_adventure_idle
     }
 
 
-    [HarmonyPatch(typeof(CharacterMovement), "Teleport")]
-    public class CharacterMovementTeleportPatch
-    {
-        static bool Prefix(CharacterMovement __instance)
-        {
-            var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
-            if (cloneComp != null)
-            {
-                // Skip original Update for clones
-                return false;
-            }
-            // Normal Update for local player
-            return true;
-        }
-    }
-
-    //TODO Test to see if patch works
     [HarmonyPatch(typeof(TeleportScript), "OnTriggerEnter2D")]
     public class TeleportScriptTeleportPatch
     {
@@ -757,22 +734,7 @@ namespace Multi_bloob_adventure_idle
             var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
             if (cloneComp != null)
             {
-                /*string playerName = __instance.gameObject.name.Replace("BloobClone_", "");
-                // Move to grabbing currentPosition of original clones
-                if (MultiplayerPatchPlugin.players.TryGetValue(playerName, out PlayerData player))
-                {
-                    /*if (Vector3.Distance(cloneComp.transform.position, player.currentPosition.ToVector3()) >= 500f)
-                    {
-                        cloneComp.transform.position.Set(player.currentPosition.x, player.currentPosition.y, player.currentPosition.z);
-                        return false;
-                    }#1#
-                    if (cloneComp.lastTargetPosition != player.currentPosition.ToVector3())
-                    {
-                        __instance.MoveTo(player.currentPosition.ToVector3());
-                        cloneComp.lastTargetPosition = player.currentPosition.ToVector3();
-                    }
-                }*/
-                // Skip original Update for clones
+                // Handled within UpdateGhostPlayers
                 return false;
             }
 
@@ -780,6 +742,23 @@ namespace Multi_bloob_adventure_idle
             return true;
         }
     }
+
+[HarmonyPatch(typeof(CharacterMovement), nameof(CharacterMovement.CloseAllShops))]
+public class CharacterMovementCloseAllShopsPatch
+{
+    static bool Prefix(CharacterMovement __instance)
+    {
+        var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
+        if (cloneComp != null) { return false; }
+
+        foreach (var shopUi in __instance.shops)
+        {
+            shopUi.CloseShop();
+        }
+
+        return false;
+    }
+}
 
 
 
@@ -803,11 +782,3 @@ public class IsMultiplayerClone : MonoBehaviour
         }
     }
 
-
-
-
-/*TODO
- * 
- * Add button to settings to disable/enable ghoust souls and level gui
- *
- */
