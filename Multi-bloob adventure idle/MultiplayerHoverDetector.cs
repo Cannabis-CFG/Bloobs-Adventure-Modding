@@ -13,13 +13,13 @@ public class MultiplayerHoverDetector : MonoBehaviour
 
     void Start()
     {
-        Debug.Log("Started Hover ShitHead");
+        //Debug.Log("Started Hover ShitHead");
         GameObject lcaGameObject = GameObject.Find("LCA");
         if (lcaGameObject == null) return;
         Transform camTransform = lcaGameObject.transform.Find("Main Camera");
         if (camTransform == null) return;
         cam = camTransform.GetComponent<Camera>();
-        Debug.Log("Found camera");
+        //Debug.Log("Found camera");
         //cam = Camera.current;
     }
 
@@ -27,29 +27,31 @@ public class MultiplayerHoverDetector : MonoBehaviour
     {
         if (!MultiplayerPatchPlugin.isReady || cam == null || !MultiplayerPatchPlugin.EnableLevelPanel.Value)
             return;
-        Vector3 worldPoint = cam.ScreenToWorldPoint(Input.mousePosition);
 
+        Vector3 worldPoint3D = cam.ScreenToWorldPoint(Input.mousePosition);
+        Vector2 worldPoint2D = new Vector2(worldPoint3D.x, worldPoint3D.y);
+        bool hitOne = false;
         foreach (var cloneComp in GameObject.FindObjectsOfType<IsMultiplayerClone>())
         {
-            var spriteRendererer = cloneComp.GetComponent<SpriteRenderer>();
-            if (spriteRendererer != null &&
-                spriteRendererer.bounds.Contains(new Vector3(worldPoint.x, worldPoint.y,
-                    spriteRendererer.bounds.center.z)))
+            var sr = cloneComp.GetComponent<SpriteRenderer>();
+            if (sr != null && sr.bounds.Contains(new Vector3(worldPoint2D.x, worldPoint2D.y, sr.bounds.center.z)))
             {
+                
                 string cloneName = cloneComp.name.Replace("BloobClone_", "");
-                if (MultiplayerPatchPlugin.players.TryGetValue(cloneName, out PlayerData playerData))
+                if (MultiplayerPatchPlugin.players.TryGetValue(cloneName, out var playerData))
                 {
                     string info = BuildHoverInfo(cloneName, playerData);
                     HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);
+                    hitOne = true;
                 }
-            }
-            else
-            {
-                HoverUIManager.Instance.HideInfo();
+                break;
             }
         }
 
-
+        if (!hitOne)
+        {
+            HoverUIManager.Instance.HideInfo();
+        }
     }
 
     private string BuildHoverInfo(string playerName, PlayerData data)

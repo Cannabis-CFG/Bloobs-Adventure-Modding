@@ -1,24 +1,25 @@
-﻿using System;
-using BepInEx;
+﻿using BepInEx;
+using BepInEx.Configuration;
 using HarmonyLib;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Steamworks;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using BepInEx.Configuration;
-using Newtonsoft.Json.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using WebSocketSharp;
+using Image = UnityEngine.UI.Image;
 
 
 namespace Multi_bloob_adventure_idle
 {
-    [BepInPlugin("com.cannabis.multibloobidle", "Multiblood Adventure Idle", "0.0.69")]
+    [BepInPlugin("com.cannabis.multibloobidle", "Multiblood Adventure Idle", "1.0.0")]
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
 
@@ -33,20 +34,22 @@ namespace Multi_bloob_adventure_idle
         private Coroutine ghostPlayerCoroutine;
         private Coroutine playerLevelCoroutine;
         public static bool isReady = false;
+        private bool nameTagCreated;
         public static ConfigEntry<bool> EnableLevelPanel;
-        //public static ConfigEntry<bool> EnableGhostSouls;
         private string nameCache;
-        private Scene lastScene;
+        private bool atMM;
         private JObject lastPayload = null;
 
         public static MultiplayerPatchPlugin instance;
+
+        private bool isMonitoringConnection;
 
 
         public static readonly Dictionary<string, PlayerData> players = new Dictionary<string, PlayerData>();
 
         private void Awake()
         {
-            Debug.Log("Starting to wake up");
+            //Debug.Log("Starting to wake up");
             // WebServer Connection
             ws = new WebSocket("ws://172.93.111.163:42069");
             ws.OnOpen += (sender, e) =>
@@ -58,7 +61,14 @@ namespace Multi_bloob_adventure_idle
             ws.OnClose += (sender, e) =>
             {
                 isConnected = false;
-                Debug.Log("WebSocket Connection Closed");
+                Debug.Log($"Close Code: {e.Code}");
+                Debug.Log($"Reason: {e.Reason}");
+
+                if (e.Code != 1000)
+                {
+                    Debug.LogWarning("Connection was closed abnormally");
+                    StartCoroutine(ConnectionMonitorCoroutine());
+                }
             };
             ws.OnMessage += (sender, e) =>
             {
@@ -72,35 +82,20 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
             Harmony.CreateAndPatchAll(typeof(CharacterMovementCloseAllShopsPatch));
             Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
-            if (ws == null) { Debug.Log("WS NULL"); }
-            ;
-            Debug.Log("Fully woken up");
-            lock (players)
-            {
-                Debug.Log($"Have dataset: {players}");
-            }
+            if (ws == null) { Debug.Log("WS NULL");};
+            //Debug.Log("Fully woken up");
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
+            //StartCoroutine(ConnectionMonitorCoroutine());
             HandleConfiguration();
             instance ??= this;
         }
 
+
         private void OnApplicationQuit()
         {
-            var payload = new
-            {
-                reason = "ClientExiting",
-                name = nameCache
-            };
-            var json = JsonConvert.SerializeObject(payload);
-            ws.Send(json);
             ws.Close();
         }
 
-
-        private void Start()
-        {
-            // Moved to OnActiveSceneChanged
-        }
 
         private void Update()
         {
@@ -114,7 +109,6 @@ namespace Multi_bloob_adventure_idle
                 {
                     string json = messageQueue.Dequeue();
                     //Debug.Log("Got message from WS: " + json);
-
                     JObject msg;
                     try
                     {
@@ -187,6 +181,7 @@ namespace Multi_bloob_adventure_idle
                                     }
                                 }
                                 break;
+                            case "clientRemoved":
                             case "disconnect":
                                 {
                                     string name = msg["name"]?.ToString();
@@ -194,21 +189,23 @@ namespace Multi_bloob_adventure_idle
                                         HandleClientDisconnect(name);
                                 }
                                 break;
+
                         }
                     }
                 }
             }
         }
 
-        public async void OnActiveSceneChanged(Scene current, Scene next)
-            { 
-            // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
-            await Task.Delay(TimeSpan.FromSeconds(7));
 
+        public async void OnActiveSceneChanged(Scene current, Scene next)
+        {
+            //Scene current doesn't ever instantiate, only use Scene next
+            Debug.Log($"Next Scene {next.name}");
             switch (next.name)
             {
-                //TODO Handle main menu case, prevents crashes
                 case "GameCloud":
+                    // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
+                    await Task.Delay(TimeSpan.FromSeconds(7));
                     // We check if Steam has initialized, if it hasn't in time we wait 5 seconds and try again. Ensuring no issues on timings
                     if (!SteamClient.IsValid)
                     {
@@ -217,17 +214,21 @@ namespace Multi_bloob_adventure_idle
                         return;
                     }
                     isReady = true;
-                    lastScene = next; // Cache latest scene change to handle main menu changes
                     new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
                     new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
                     ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
                     playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
                     positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
                     AddsettingOptions();
+                    if (atMM)
+                    {
+                        ws.Send(lastPayload.ToString(Formatting.None));
+                    }
                     break;
             }
 
         }
+
 
         public void HandleClientDisconnect(string name)
         {
@@ -252,7 +253,7 @@ namespace Multi_bloob_adventure_idle
             Dictionary<string, string> NameMap = new()
             {
                 { "WoodCutting", "Woodcutting" }
-              
+
             };
 
             Dictionary<string, (int level, int prestige)> skillData = new();
@@ -363,6 +364,30 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
+        public void ApplyLocalNametag()
+        {
+            GameObject player = GameObject.Find("BloobCharacter");
+            if (player == null)
+            {
+                Debug.LogError("Local player not found");
+                return;
+            }
+
+            var namePlate = new GameObject("LocalNamePlate");
+            namePlate.transform.SetParent(player.transform, false);
+            namePlate.transform.localPosition = new Vector3(0, 1.125f, 0);
+
+            var nameText = namePlate.AddComponent<TextMeshPro>();
+            nameText.text = SteamClient.Name;
+            nameText.fontSize = 6;
+            nameText.alignment = TextAlignmentOptions.Center;
+            nameText.color = Color.white;
+
+            var mr = nameText.GetComponent<MeshRenderer>();
+            mr.sortingLayerName = "UI";
+        }
+
+
         IEnumerator UpdateGhostPlayers()
         {
 
@@ -379,6 +404,12 @@ namespace Multi_bloob_adventure_idle
                 {
                     Debug.LogWarning("BloobCharacter not found.");
                     continue;
+                }
+
+                if (!nameTagCreated)
+                {
+                    ApplyLocalNametag();
+                    nameTagCreated = true;
                 }
 
                 //Debug.Log($"Object name to clone is {original.gameObject.name} Of type {original.GetType()}");
@@ -406,42 +437,26 @@ namespace Multi_bloob_adventure_idle
                             clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                             clone.transform.position = kvp.Value.currentPosition.ToVector3();
 
-                            // Remove unwanted components and children (same as your existing code)
+                            // Remove unwanted components and children
                             foreach (var collider in clone.GetComponents<CircleCollider2D>())
                                 Destroy(collider);
-                            //Remove Children From BloobCharacter(Player Character) Game Object
+                            //Remove Children
                             foreach (Transform child in clone.transform)
                                 if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
                                     Destroy(child.gameObject);
 
+                            var namePlate = new GameObject("NamePlate");
+                            namePlate.transform.SetParent(clone.transform, false);
+                            namePlate.transform.localPosition = new Vector3(0, 1.125f, 0);
+                            var nameText = namePlate.AddComponent<TextMeshPro>();
+                            nameText.text = playerName;
+                            nameText.fontSize = 6;
+                            nameText.alignment = TextAlignmentOptions.Center;
+                            nameText.color = Color.white;
 
+                            var mr = nameText.GetComponent<MeshRenderer>();
+                            mr.sortingLayerName = "UI";
 
-                            // Setup UI Text with playerName
-                            Canvas canvas = clone.GetComponentInChildren<Canvas>();
-                            if (canvas != null)
-                            {
-                                // Create or find PlayerName text object to avoid duplicates
-                                var existingText = canvas.transform.Find("PlayerName");
-                                TextMeshProUGUI text;
-                                if (existingText != null)
-                                    text = existingText.GetComponent<TextMeshProUGUI>();
-                                else
-                                {
-                                    GameObject textGO = new GameObject("PlayerName");
-                                    textGO.transform.SetParent(canvas.transform, false);
-                                    text = textGO.AddComponent<TextMeshProUGUI>();
-                                    RectTransform rt = text.GetComponent<RectTransform>();
-                                    rt.anchoredPosition = new Vector2(0, 50); // position above character
-                                    text.fontSize = 24;
-                                    text.alignment = TextAlignmentOptions.Center;
-                                    text.color = Color.white;
-                                }
-                                text.text = playerName; // set player name text
-                            }
-                            else
-                            {
-                                Debug.LogWarning("No Canvas found in BloobClone.");
-                            }
                         }
                         //Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
                         if (kvp.Value.currentPosition.ToVector3() == clone.transform.position)
@@ -452,7 +467,7 @@ namespace Multi_bloob_adventure_idle
                         clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
                         if (Vector3.Distance(clone.transform.position, kvp.Value.currentPosition.ToVector3()) >= 750f)
                         {
-                            //Debug.Log($"Detected potential different zone for clone from previous dataset, adjusting movement speed to zip to {kvp.Value.currentPosition.ToVector3()}");
+                            //Set movement speed massively high in cases of teleports being hit
                             clone.GetComponent<CharacterMovement>().moveSpeed = 400;
                         }
                         //Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
@@ -460,39 +475,11 @@ namespace Multi_bloob_adventure_idle
 
 
                     }
-
-                    Canvas originalCanvas = original.GetComponentInChildren<Canvas>();
-                    if (originalCanvas != null)
-                    {
-                        // Create or find PlayerName text object to avoid duplicates
-                        var existingText = originalCanvas.transform.Find("PlayerName");
-                        TextMeshProUGUI text;
-                        if (existingText != null)
-                            text = existingText.GetComponent<TextMeshProUGUI>();
-                        else
-                        {
-                            GameObject textGO = new GameObject("PlayerName");
-                            textGO.transform.SetParent(originalCanvas.transform, false);
-                            text = textGO.AddComponent<TextMeshProUGUI>();
-                            RectTransform rt = text.GetComponent<RectTransform>();
-                            rt.anchoredPosition = new Vector2(0, 50); // position above character
-                            text.fontSize = 24;
-                            text.alignment = TextAlignmentOptions.Center;
-                            text.color = Color.white;
-                            //Debug.LogWarning("PlayerName Text Created");
-                        }
-                        text.text = nameCache; // set player name text
-                    }
-                    else
-                    {
-                        Debug.LogWarning("No Canvas found in BloobCharacter.");
-                    }
                 }
 
                 yield return new WaitForSecondsRealtime(1f);
             }
         }
-
 
 
         IEnumerator GetPositionEnumerator()
@@ -554,14 +541,52 @@ namespace Multi_bloob_adventure_idle
                     ws.Send(jsonPayload);
                     lastPayload = newPayload;
                 }
-
-
-                /*string json = JsonConvert.SerializeObject(payload);
-                Debug.Log($"Sending data: {json} to server");
-                ws.Send(json);
-                Debug.Log("Hey shithead");*/
+                //Debug.Log("Hey shithead");
                 yield return new WaitForSecondsRealtime(1f);
             }
+        }
+
+
+        private IEnumerator ConnectionMonitorCoroutine(int maxRetries = 5, float retryDelay = 5f, float checkInterval = 10f)
+        {
+            if (isMonitoringConnection)
+            {
+                yield break;
+            }
+
+            while (true)
+            {
+                if (!isConnected || !ws.IsAlive)
+                {
+                    Debug.LogWarning("[WS] Lost connection — attempting to reconnect...");
+
+                    for (int attempt = 1; attempt <= maxRetries && !isConnected; attempt++)
+                    {
+                        Debug.Log($"[WS] Reconnect attempt {attempt}/{maxRetries}...");
+                        ws.ConnectAsync();
+
+                        float timer = 0f;
+                        while (timer < retryDelay && !isConnected)
+                        {
+                            timer += Time.deltaTime;
+                            yield return null;
+                        }
+                    }
+
+                    if (isConnected)
+                    {
+                        Debug.Log("[WS] Reconnected successfully! Reinitializing player data");
+                        ws.Send(lastPayload.ToString(Formatting.None));
+                        //StopCoroutine(ConnectionMonitorCoroutine());
+                        break;
+                    }
+
+                    else
+                        Debug.LogError($"[WS] Failed to reconnect after {maxRetries} attempts.");
+                }
+                yield return new WaitForSeconds(checkInterval);
+            }
+            isMonitoringConnection = false;
         }
 
 
@@ -569,8 +594,36 @@ namespace Multi_bloob_adventure_idle
         {
             EnableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
                 "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
-            //EnableGhostSouls = Config.Bind("Visual", "Enable Ghost Souls", true,
-                //"Toggles whether or not to see souls that ghost players have equipped");
+        }
+
+        public void MainMenuClicked()
+        {
+            ghostPlayerCoroutine = null;
+            playerLevelCoroutine = null;
+            positionCoroutine = null;
+            isReady = false;
+            var GO = GameObject.Find("HoverUIManager");
+            var GO1 = GameObject.Find("HoverDetector");
+            if (GO != null)
+            {
+                Destroy(GO);
+            }
+            if (GO1 != null)
+            {
+                Destroy(GO1);
+            }
+
+            atMM = true;
+            var payload = new
+            {
+                type = "RemoveClient",
+                reason = "ClientMainMenu",
+                name = nameCache
+            };
+            var json = JsonConvert.SerializeObject(payload);
+            ws.Send(json);
+            nameTagCreated = false;
+
         }
 
         public void AddsettingOptions()
@@ -617,6 +670,15 @@ namespace Multi_bloob_adventure_idle
 
             Debug.Log("Settings Ui found!");
 
+            var mainMenu = settingsUi.Find("Main Menu").gameObject;
+            var button = mainMenu?.GetComponent<Button>();
+            if (button != null)
+            {
+                button.onClick.AddListener(MainMenuClicked);
+                Debug.Log("Found Main Menu button, added listener for going to main menu.");
+            }
+
+
             // Look for "Sound Off" under "Settings Ui"
             Transform soundOff = settingsUi.Find("Sound Off");
             if (soundOff == null)
@@ -628,43 +690,63 @@ namespace Multi_bloob_adventure_idle
             Debug.Log("Sound Off Found");
 
             // Add toggles
-            //AddButton(settingsUi, "Enable Ghost Souls", EnableGhostSouls, new Vector2(150, 160));
-            AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 120));
+            AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 40));
 
         }
 
 
         private void AddButton(Transform parent, string labelText, ConfigEntry<bool> configEntry, Vector2 position)
         {
-            // Create button object
+            // Create Button 
             GameObject buttonObj = new GameObject(labelText + " Button");
             buttonObj.transform.SetParent(parent, false);
 
             RectTransform rt = buttonObj.AddComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(300, 40);
-            rt.anchoredPosition = position;
 
-            // Add Button + Image (Unity UI requirement)
+            // Set position
+            rt.anchoredPosition = position;
+            rt.sizeDelta = Vector2.zero;
+
+            
             Image image = buttonObj.AddComponent<Image>();
             image.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
+
+            // Button
             Button button = buttonObj.AddComponent<Button>();
 
-            // Create label for button text
+            // ContentSizeFitter to make button resize to fit content
+            ContentSizeFitter fitter = buttonObj.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            // Create Label child object
             GameObject labelObj = new GameObject("Label");
             labelObj.transform.SetParent(buttonObj.transform, false);
+
             TextMeshProUGUI label = labelObj.AddComponent<TextMeshProUGUI>();
             label.text = labelText + ": " + (configEntry.Value ? "ON" : "OFF");
             label.fontSize = 18;
             label.alignment = TextAlignmentOptions.Center;
             label.color = Color.white;
 
+            // Stretch label to fill button
             RectTransform labelRT = label.GetComponent<RectTransform>();
             labelRT.anchorMin = Vector2.zero;
             labelRT.anchorMax = Vector2.one;
             labelRT.offsetMin = Vector2.zero;
             labelRT.offsetMax = Vector2.zero;
 
-            // Click handler (must come after label is declared)
+            LayoutElement layoutElement = labelObj.AddComponent<LayoutElement>();
+            layoutElement.preferredWidth = -1; 
+            layoutElement.preferredHeight = -1;
+
+            var layoutGroup = buttonObj.AddComponent<HorizontalLayoutGroup>();
+            layoutGroup.childAlignment = TextAnchor.MiddleCenter;
+            layoutGroup.padding = new RectOffset(10, 10, 5, 5); 
+            layoutGroup.childForceExpandWidth = false;
+            layoutGroup.childForceExpandHeight = false;
+
+            // Update text and button on click
             button.onClick.AddListener(() =>
             {
                 configEntry.Value = !configEntry.Value;
@@ -677,71 +759,76 @@ namespace Multi_bloob_adventure_idle
 
 }
 
-    public class PlayerData
+
+public class PlayerData
+{
+    public string name;
+    public bool isDisconnecting;
+    public Vector3Like currentPosition;
+    public float runSpeed;
+    public string hatName;
+    public string wingName;
+    public ColourLike bloobColour;
+    public Dictionary<string, (int level, int prestige)> skillData;
+    public string[] soulData;
+}
+
+
+public class Vector3Like
+{
+    public float x;
+    public float y;
+    public float z;
+
+    public Vector3 ToVector3() => new Vector3(x, y, z);
+    public Vector2 ToVector2() => new Vector2(x, y);
+}
+
+
+public class ColourLike
+{
+    public float a;
+    public float r;
+    public float g;
+    public float b;
+
+    public Color ToColor() => new Color(r, g, b, a);
+}
+
+
+[HarmonyPatch(typeof(TeleportScript), "OnTriggerEnter2D")]
+public class TeleportScriptTeleportPatch
+{
+    static bool Prefix(TeleportScript __instance)
     {
-        public string name;
-        public bool isDisconnecting;
-        public Vector3Like currentPosition;
-        public float runSpeed;
-        public string hatName;
-        public string wingName;
-        public ColourLike bloobColour;
-        public Dictionary<string, (int level, int prestige)> skillData;
-        public string[] soulData;
-    }
-
-    public class Vector3Like
-    {
-        public float x;
-        public float y;
-        public float z;
-
-        public Vector3 ToVector3() => new Vector3(x, y, z);
-        public Vector2 ToVector2() => new Vector2(x, y);
-    }
-
-    public class ColourLike
-    {
-        public float a;
-        public float r;
-        public float g;
-        public float b;
-
-        public Color ToColor() => new Color(r, g, b, a);
-    }
-
-
-    [HarmonyPatch(typeof(TeleportScript), "OnTriggerEnter2D")]
-    public class TeleportScriptTeleportPatch
-    {
-        static bool Prefix(TeleportScript __instance)
+        var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
+        if (cloneComp != null)
         {
-            var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
-            if (cloneComp != null)
-            {
-                return false;
-            }
-            // Normal Update for local player
-            return true;
+            return false;
         }
+        // Normal Update for local player
+        return true;
     }
+}
+
 
 [HarmonyPatch(typeof(CharacterMovement), "Update")]
-    public class CharacterMovementUpdatePatch
+public class CharacterMovementUpdatePatch
+{
+    static bool Prefix(CharacterMovement __instance)
     {
-        static bool Prefix(CharacterMovement __instance)
+        var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
+        if (cloneComp != null)
         {
-            var cloneComp = __instance.gameObject.GetComponent<IsMultiplayerClone>();
-            if (cloneComp != null)
-            {
-                // Handled within UpdateGhostPlayers
-                return false;
-            }
-
-            // Normal Update for local player
-            return true;
+            // Handled within UpdateGhostPlayers
+            return false;
         }
+
+        // Normal Update for local player
+        return true;
     }
+}
+
 
 [HarmonyPatch(typeof(CharacterMovement), nameof(CharacterMovement.CloseAllShops))]
 public class CharacterMovementCloseAllShopsPatch
@@ -763,22 +850,22 @@ public class CharacterMovementCloseAllShopsPatch
 
 
 public class IsMultiplayerClone : MonoBehaviour
+{
+    public Vector3 lastTargetPosition = Vector3.positiveInfinity;
+}
+
+
+public class WebSocketMessage
+{
+    public string type { get; set; }
+    public PlayerData[] data { get; set; }
+}
+
+
+public class Billboard : MonoBehaviour
+{
+    void Update()
     {
-        public Vector3 lastTargetPosition = Vector3.positiveInfinity;
+        transform.rotation = Quaternion.LookRotation(transform.position - Camera.main.transform.position);
     }
-
-    public class WebSocketMessage
-    {
-        public string type { get; set; }
-        public PlayerData[] data { get; set; }
-    }
-
-
-    public class Billboard : MonoBehaviour
-    {
-        void Update()
-        {
-            transform.rotation = Quaternion.LookRotation(transform.position - Camera.main.transform.position);
-        }
-    }
-
+}

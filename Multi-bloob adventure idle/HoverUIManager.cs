@@ -58,18 +58,18 @@ public class HoverUIManager : MonoBehaviour
         var cfg = MultiplayerPatchPlugin.instance.Config;
 
         // Panel dimensions & position
-        _panelWidth = cfg.Bind("UI", "Panel Width", 300, "Hover panel width");
-        _panelHeight = cfg.Bind("UI", "Panel Height", 150, "Hover panel height");
-        _panelPosY = cfg.Bind("UI", "Panel Pos Y", -100, "Hover panel vertical offset");
+        _panelWidth = cfg.Bind("UI", "Panel Width", 150, "Hover panel width");
+        _panelHeight = cfg.Bind("UI", "Panel Height", 88, "Hover panel height");
+        _panelPosY = cfg.Bind("UI", "Panel Pos Y", 100, "Hover panel vertical offset");
 
         // Panel background color & alpha
         _panelColorR = cfg.Bind("UI", "Panel Color R", 30, "Background R 0–255");
         _panelColorG = cfg.Bind("UI", "Panel Color G", 30, "Background G 0–255");
         _panelColorB = cfg.Bind("UI", "Panel Color B", 30, "Background B 0–255");
-        _panelAlpha = cfg.Bind("UI", "Panel Alpha", 0.7f, "Background opacity 0–1");
+        _panelAlpha = cfg.Bind("UI", "Panel Alpha", 0.9f, "Background opacity 0–1");
 
         // Shadow
-        _shadowEnabled = cfg.Bind("UI", "Shadow Enabled", true, "Enable panel drop shadow");
+        _shadowEnabled = cfg.Bind("UI", "Shadow Enabled", false, "Enable panel drop shadow");
         _shadowColorR = cfg.Bind("UI", "Shadow Color R", 0, "Shadow color R 0–255");
         _shadowColorG = cfg.Bind("UI", "Shadow Color G", 0, "Shadow color G 0–255");
         _shadowColorB = cfg.Bind("UI", "Shadow Color B", 0, "Shadow color B 0–255");
@@ -78,7 +78,7 @@ public class HoverUIManager : MonoBehaviour
         _shadowOffsetY = cfg.Bind("UI", "Shadow Offset Y", -4, "Shadow vertical offset");
 
         // Text styling
-        _fontSize = cfg.Bind("UI", "Font Size", 14, "Hover text font size");
+        _fontSize = cfg.Bind("UI", "Font Size", 8, "Hover text font size");
         _textColorR = cfg.Bind("UI", "Text Color R", 240, "Text color R 0–255");
         _textColorG = cfg.Bind("UI", "Text Color G", 240, "Text color G 0–255");
         _textColorB = cfg.Bind("UI", "Text Color B", 240, "Text color B 0–255");
