@@ -1,5 +1,6 @@
  - # This marks your game as modded
  - # This is an example mod and not intended for live use
+ - ## As such this will not be included in release packages
    ## This breaks the balance of the game
    ## This will potentially ruin the fun of the game for yourself
    ## The game's developer is NOT responsible if issues occur when using mods
