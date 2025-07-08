@@ -45,9 +45,9 @@ This enables multiple players to see each other moving, leveling, but not intera
 
 ### Dependencies
 
--   [BepInEx](https://github.com/BepInEx/BepInEx)
+-   [BepInEx v5.4.23.3](https://github.com/BepInEx/BepInEx)
     
--   [WebSocketSharp](https://sta.github.io/websocket-sharp/) (This goes within `<GameFolder>/Bloobs Adventure Idle_Data/Managed`)
+-   WebSocketSharp (This goes within `<GameFolder>/Bloobs Adventure Idle_Data/Managed`)
 
     
    ### Optional Dependency
