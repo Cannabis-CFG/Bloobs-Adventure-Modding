@@ -17,6 +17,8 @@ using WebSocketSharp;
 using Image = UnityEngine.UI.Image;
 
 
+
+
 namespace Multi_bloob_adventure_idle
 {
     [BepInPlugin("com.cannabis.multibloobidle", "Multiblood Adventure Idle", "1.0.0")]
@@ -29,20 +31,19 @@ namespace Multi_bloob_adventure_idle
 
         private WebSocket ws;
         private bool isConnected = false;
+        private bool isMonitoringConnection;
 
         private Coroutine positionCoroutine;
         private Coroutine ghostPlayerCoroutine;
-        private Coroutine playerLevelCoroutine;
+        //private Coroutine playerLevelCoroutine;
         public static bool isReady = false;
         private bool nameTagCreated;
         public static ConfigEntry<bool> EnableLevelPanel;
         private string nameCache;
         private bool atMM;
         private JObject lastPayload = null;
-
         public static MultiplayerPatchPlugin instance;
 
-        private bool isMonitoringConnection;
 
 
         public static readonly Dictionary<string, PlayerData> players = new Dictionary<string, PlayerData>();
@@ -217,7 +218,7 @@ namespace Multi_bloob_adventure_idle
                     new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
                     new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
                     ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
-                    playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
+                    //playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
                     positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
                     AddsettingOptions();
                     if (atMM)
@@ -234,7 +235,7 @@ namespace Multi_bloob_adventure_idle
         {
             var clone = GameObject.Find($"BloobClone_{name}");
             if (clone == null) return;
-            GameObject.DestroyImmediate(clone);
+            CloneManager.RemoveClone(clone);
             lock (players)
             {
                 players.Remove(name);
@@ -242,13 +243,8 @@ namespace Multi_bloob_adventure_idle
         }
 
 
-        IEnumerator UpdatePlayerLevels()
+        private Dictionary<string, (int, int)> UpdatePlayerLevels()
         {
-            if (!isReady)
-            {
-                Debug.Log("Game not ready, retrying player level update in 30 seconds.");
-                yield return new WaitForSecondsRealtime(30f);
-            }
 
             Dictionary<string, string> NameMap = new()
             {
@@ -280,7 +276,7 @@ namespace Multi_bloob_adventure_idle
                 Component skillComponent = child.GetComponent(skillClassName);
                 if (skillComponent == null)
                 {
-                    Debug.LogWarning($"No component {skillClassName} found on {childName}");
+                    //Debug.LogWarning($"No component {skillClassName} found on {childName}");
                     continue;
                 }
 
@@ -288,47 +284,35 @@ namespace Multi_bloob_adventure_idle
                 string levelFieldName = childName + "Level";
                 string prestigeFieldName = childName.ToLower() + "PrestigeLevel";
 
-                // Additional edge cases for inconsistent field names
-                if (childName.Equals("HitPoints"))
+                switch (childName)
                 {
-                    levelFieldName = "HitPointsLevel";
-                    prestigeFieldName = "HitPointsPrestigeLevel";
-                }
-
-                if (childName.Equals("Mining"))
-                {
-                    levelFieldName = "MiningLevel";
-                }
-
-                if (childName.Equals("WoodCutting"))
-                {
-                    levelFieldName = "woodcuttinglevel";
-                }
-
-                if (childName.Equals("SoulBinding"))
-                {
-                    levelFieldName = "SoulBindingLevel";
-                    prestigeFieldName = "SoulBindingPrestigeLevel";
-                }
-
-                if (childName.Equals("BowCrafting"))
-                {
-                    prestigeFieldName = "bowCraftingPrestigeLevel";
-                }
-
-                if (childName.Equals("BeastMastery"))
-                {
-                    prestigeFieldName = "beastMasteryPrestigeLevel";
-                }
-
-                if (childName.Equals("Thieving"))
-                {
-                    levelFieldName = "ThievingLevel";
-                }
-
-                if (childName.Equals("Fishing"))
-                {
-                    levelFieldName = "FishingLevel";
+                    // Additional edge cases for inconsistent field names
+                    case "HitPoints":
+                        levelFieldName = "HitPointsLevel";
+                        prestigeFieldName = "HitPointsPrestigeLevel";
+                        break;
+                    case "Mining":
+                        levelFieldName = "MiningLevel";
+                        break;
+                    case "WoodCutting":
+                        levelFieldName = "woodcuttinglevel";
+                        break;
+                    case "SoulBinding":
+                        levelFieldName = "SoulBindingLevel";
+                        prestigeFieldName = "SoulBindingPrestigeLevel";
+                        break;
+                    case "BowCrafting":
+                        prestigeFieldName = "bowCraftingPrestigeLevel";
+                        break;
+                    case "BeastMastery":
+                        prestigeFieldName = "beastMasteryPrestigeLevel";
+                        break;
+                    case "Thieving":
+                        levelFieldName = "ThievingLevel";
+                        break;
+                    case "Fishing":
+                        levelFieldName = "FishingLevel";
+                        break;
                 }
 
                 int level = GetIntField(skillComponent, levelFieldName);
@@ -338,8 +322,8 @@ namespace Multi_bloob_adventure_idle
                 //Debug.Log($"[Skill] {childName}: Level={level} Prestige={prestige}");
             }
 
-            playerSkills = skillData;
-            yield return new WaitForSecondsRealtime(60f);
+            return skillData;
+            //yield return new WaitForSecondsRealtime(60f);
         }
 
         int GetIntField(Component comp, string fieldName)
@@ -364,14 +348,8 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
-        public void ApplyLocalNametag()
+        public void ApplyLocalNametag(GameObject player)
         {
-            GameObject player = GameObject.Find("BloobCharacter");
-            if (player == null)
-            {
-                Debug.LogError("Local player not found");
-                return;
-            }
 
             var namePlate = new GameObject("LocalNamePlate");
             namePlate.transform.SetParent(player.transform, false);
@@ -390,7 +368,12 @@ namespace Multi_bloob_adventure_idle
 
         IEnumerator UpdateGhostPlayers()
         {
-
+            GameObject original = GameObject.Find("BloobCharacter");
+            if (original is null)
+            {
+                Debug.LogWarning("BloobCharacter not found.");
+                yield return new WaitForSecondsRealtime(5f);
+            }
             while (true)
             {
                 if (!isReady)
@@ -399,84 +382,24 @@ namespace Multi_bloob_adventure_idle
                     yield return new WaitForSecondsRealtime(15f);
                 }
 
-                GameObject original = GameObject.Find("BloobCharacter");
-                if (original == null)
-                {
-                    Debug.LogWarning("BloobCharacter not found.");
-                    continue;
-                }
 
                 if (!nameTagCreated)
                 {
-                    ApplyLocalNametag();
+                    ApplyLocalNametag(original);
                     nameTagCreated = true;
                 }
-
-                //Debug.Log($"Object name to clone is {original.gameObject.name} Of type {original.GetType()}");
 
                 lock (players)
                 {
                     foreach (var kvp in players)
                     {
-                        string playerName = kvp.Key;
-
-                        if (playerName == nameCache) continue;
-
-                        //Debug.LogError($"Currently doing shit for {playerName}");
-
-                        // Find or create clone for this player
-                        GameObject clone = GameObject.Find("BloobClone_" + playerName);
-                        if (clone == null)
-                        {
-
-
-                            clone = Instantiate(original);
-                            clone.name = "BloobClone_" + playerName;
-                            clone.AddComponent<IsMultiplayerClone>();
-                            clone.GetComponent<SpriteRenderer>().color = kvp.Value.bloobColour.ToColor();
-                            clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
-                            clone.transform.position = kvp.Value.currentPosition.ToVector3();
-
-                            // Remove unwanted components and children
-                            foreach (var collider in clone.GetComponents<CircleCollider2D>())
-                                Destroy(collider);
-                            //Remove Children
-                            foreach (Transform child in clone.transform)
-                                if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
-                                    Destroy(child.gameObject);
-
-                            var namePlate = new GameObject("NamePlate");
-                            namePlate.transform.SetParent(clone.transform, false);
-                            namePlate.transform.localPosition = new Vector3(0, 1.125f, 0);
-                            var nameText = namePlate.AddComponent<TextMeshPro>();
-                            nameText.text = playerName;
-                            nameText.fontSize = 6;
-                            nameText.alignment = TextAlignmentOptions.Center;
-                            nameText.color = Color.white;
-
-                            var mr = nameText.GetComponent<MeshRenderer>();
-                            mr.sortingLayerName = "UI";
-
-                        }
-                        //Debug.Log($"Attempting to update {kvp.Value.name}'s clone location");
-                        if (kvp.Value.currentPosition.ToVector3() == clone.transform.position)
-                        {
-                            //Debug.Log("Position is the same, skipping");
+                        if (kvp.Key == nameCache)
                             continue;
-                        }
-                        clone.GetComponent<CharacterMovement>().moveSpeed = kvp.Value.runSpeed;
-                        if (Vector3.Distance(clone.transform.position, kvp.Value.currentPosition.ToVector3()) >= 750f)
-                        {
-                            //Set movement speed massively high in cases of teleports being hit
-                            clone.GetComponent<CharacterMovement>().moveSpeed = 400;
-                        }
-                        //Debug.Log($"Attempting to move clone to {kvp.Value.currentPosition.ToVector3()}");
-                        clone.GetComponent<CharacterMovement>().MoveTo(kvp.Value.currentPosition.ToVector2());
 
-
+                        CloneManager.UpdateOrCreateClone(original, kvp.Value);
+                        
                     }
                 }
-
                 yield return new WaitForSecondsRealtime(1f);
             }
         }
@@ -504,7 +427,7 @@ namespace Multi_bloob_adventure_idle
                         z = Mathf.Round(player.transform.position.z)
                     },
                     isDisconnecting = false,
-                    skillData = playerSkills,
+                    skillData = UpdatePlayerLevels(),
                     bloobColour = new ColourLike()
                     {
                         //playerGameObject.GetComponent<SpriteRenderer>().color
@@ -584,7 +507,7 @@ namespace Multi_bloob_adventure_idle
                     else
                         Debug.LogError($"[WS] Failed to reconnect after {maxRetries} attempts.");
                 }
-                yield return new WaitForSeconds(checkInterval);
+                yield return new WaitForSecondsRealtime(checkInterval);
             }
             isMonitoringConnection = false;
         }
@@ -599,7 +522,6 @@ namespace Multi_bloob_adventure_idle
         public void MainMenuClicked()
         {
             ghostPlayerCoroutine = null;
-            playerLevelCoroutine = null;
             positionCoroutine = null;
             isReady = false;
             var GO = GameObject.Find("HoverUIManager");
@@ -848,24 +770,37 @@ public class CharacterMovementCloseAllShopsPatch
 }
 
 
+[HarmonyPatch(typeof(BloobColourChange), nameof(BloobColourChange.SetPlayerWing))]
+public class BloobColourChangeWingPatch
+{
+    [HarmonyPostfix]
+    private void Postfix(BloobColourChange __instance, int __wingIndex)
+    {
+        Debug.Log($"Index changed to {__wingIndex}");
+    }
+}
+
+[HarmonyPatch(typeof(BloobColourChange), nameof(BloobColourChange.SetPlayerHat))]
+public class BloobColourChangeHatPatch
+{
+    [HarmonyPostfix]
+    private void Postfix(BloobColourChange __instance)
+    {
+
+    }
+}
 
 public class IsMultiplayerClone : MonoBehaviour
 {
-    public Vector3 lastTargetPosition = Vector3.positiveInfinity;
+    //public Vector3 lastTargetPosition = Vector3.positiveInfinity;
 }
 
 
-public class WebSocketMessage
-{
-    public string type { get; set; }
-    public PlayerData[] data { get; set; }
-}
 
-
-public class Billboard : MonoBehaviour
+/*public class Billboard : MonoBehaviour
 {
     void Update()
     {
         transform.rotation = Quaternion.LookRotation(transform.position - Camera.main.transform.position);
     }
-}
+}*/
