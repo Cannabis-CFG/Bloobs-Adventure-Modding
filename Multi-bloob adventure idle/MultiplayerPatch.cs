@@ -39,6 +39,7 @@ namespace Multi_bloob_adventure_idle
         public static bool isReady = false;
         private bool nameTagCreated;
         public static ConfigEntry<bool> EnableLevelPanel;
+        public static ConfigEntry<bool> EnableContextMenu;
         private string nameCache;
         private bool atMM;
         private JObject lastPayload = null;
@@ -83,6 +84,7 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
             Harmony.CreateAndPatchAll(typeof(CharacterMovementCloseAllShopsPatch));
             Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
+            Harmony.CreateAndPatchAll(typeof(BloobColourChangeWingPatch));
             if (ws == null) { Debug.Log("WS NULL");};
             //Debug.Log("Fully woken up");
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -517,6 +519,8 @@ namespace Multi_bloob_adventure_idle
         {
             EnableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
                 "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
+            EnableContextMenu = Config.Bind("Visual", "Enable Context Menu", true,
+                "Enables a context menu when you right click to display overlapping ghosts");
         }
 
         public void MainMenuClicked()
@@ -613,6 +617,8 @@ namespace Multi_bloob_adventure_idle
 
             // Add toggles
             AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 40));
+            //TODO Setup handling of creating/destroying of context menu behaviour on toggle to clean up properly
+            AddButton(settingsUi, "Enable Context Menu", EnableContextMenu, new Vector2(150, 55));
 
         }
 
@@ -769,14 +775,14 @@ public class CharacterMovementCloseAllShopsPatch
     }
 }
 
-
+//TODO Implement syncing of hat/wings
 [HarmonyPatch(typeof(BloobColourChange), nameof(BloobColourChange.SetPlayerWing))]
 public class BloobColourChangeWingPatch
 {
     [HarmonyPostfix]
-    private void Postfix(BloobColourChange __instance, int __wingIndex)
+    private static void Postfix(BloobColourChange __instance, int wingIndex)
     {
-        Debug.Log($"Index changed to {__wingIndex}");
+        Debug.Log($"Index changed to {wingIndex}");
     }
 }
 
@@ -784,7 +790,7 @@ public class BloobColourChangeWingPatch
 public class BloobColourChangeHatPatch
 {
     [HarmonyPostfix]
-    private void Postfix(BloobColourChange __instance)
+    private static void Postfix(BloobColourChange __instance)
     {
 
     }

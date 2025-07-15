@@ -9,7 +9,8 @@ namespace Multi_bloob_adventure_idle;
 
 public class MultiplayerHoverDetector : MonoBehaviour
 {
-    private Camera cam;
+    public static Camera cam;
+    public static MultiplayerHoverDetector instance;
 
     void Start()
     {
@@ -19,13 +20,14 @@ public class MultiplayerHoverDetector : MonoBehaviour
         Transform camTransform = lcaGameObject.transform.Find("Main Camera");
         if (camTransform == null) return;
         cam = camTransform.GetComponent<Camera>();
+        instance ??= this;
         //Debug.Log("Found camera");
         //cam = Camera.current;
     }
 
     void Update()
     {
-        if (!MultiplayerPatchPlugin.isReady || cam == null || !MultiplayerPatchPlugin.EnableLevelPanel.Value)
+        if (!MultiplayerPatchPlugin.isReady || !cam || !MultiplayerPatchPlugin.EnableLevelPanel.Value || MultiplayerContextMenu.IsContextMenuOpen)
             return;
 
         Vector3 worldPoint3D = cam.ScreenToWorldPoint(Input.mousePosition);
@@ -34,7 +36,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
         foreach (var cloneComp in GameObject.FindObjectsOfType<IsMultiplayerClone>())
         {
             var sr = cloneComp.GetComponent<SpriteRenderer>();
-            if (sr != null && sr.bounds.Contains(new Vector3(worldPoint2D.x, worldPoint2D.y, sr.bounds.center.z)))
+            if (sr && sr.bounds.Contains(new Vector3(worldPoint2D.x, worldPoint2D.y, sr.bounds.center.z)))
             {
                 
                 string cloneName = cloneComp.name.Replace("BloobClone_", "");
@@ -54,7 +56,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
         }
     }
 
-    private string BuildHoverInfo(string playerName, PlayerData data)
+    public static string BuildHoverInfo(string playerName, PlayerData data)
     {
         var columnWidth = 20;
         var sorted = data.skillData

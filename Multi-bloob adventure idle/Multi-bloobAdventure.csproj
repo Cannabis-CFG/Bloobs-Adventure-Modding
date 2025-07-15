@@ -135,6 +135,7 @@
   <ItemGroup>
     <Compile Include="CloneManager.cs" />
     <Compile Include="HoverUIManager.cs" />
+    <Compile Include="MultiplayerContextMenu.cs" />
     <Compile Include="MultiplayerHoverDetector.cs" />
     <Compile Include="MultiplayerPatch.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

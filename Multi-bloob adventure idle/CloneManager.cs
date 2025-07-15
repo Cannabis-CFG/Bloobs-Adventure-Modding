@@ -64,7 +64,7 @@ namespace Multi_bloob_adventure_idle
             else
             {
                 clone.SetColor(playerData.bloobColour.ToColor());
-                clone.MoveTo(playerData.currentPosition.ToVector2());
+                clone.MoveTo(playerData.currentPosition.ToVector2(), playerData.runSpeed);
             }
         }
 
