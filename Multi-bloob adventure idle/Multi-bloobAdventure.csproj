@@ -78,9 +78,6 @@
     <Reference Include="MonoMod.Utils">
       <HintPath>..\References\MonoMod.Utils.dll</HintPath>
     </Reference>
-    <Reference Include="netstandard">
-      <HintPath>..\References\netstandard.dll</HintPath>
-    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\References\Newtonsoft.Json.dll</HintPath>
     </Reference>

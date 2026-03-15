@@ -27,7 +27,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
 
     void Update()
     {
-        if (!MultiplayerPatchPlugin.isReady || !cam || !MultiplayerPatchPlugin.EnableLevelPanel.Value || MultiplayerContextMenu.IsContextMenuOpen)
+        if (!MultiplayerPatchPlugin.isReady || !cam || !MultiplayerPatchPlugin.enableLevelPanel.Value || MultiplayerContextMenu.IsContextMenuOpen)
             return;
 
         Vector3 worldPoint3D = cam.ScreenToWorldPoint(Input.mousePosition);
@@ -40,7 +40,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
             {
                 
                 string cloneName = cloneComp.name.Replace("BloobClone_", "");
-                if (MultiplayerPatchPlugin.players.TryGetValue(cloneName, out var playerData))
+                if (MultiplayerPatchPlugin.Players.TryGetValue(cloneName, out var playerData))
                 {
                     string info = BuildHoverInfo(cloneName, playerData);
                     HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);

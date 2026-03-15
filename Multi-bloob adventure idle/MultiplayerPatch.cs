@@ -38,16 +38,16 @@ namespace Multi_bloob_adventure_idle
         //private Coroutine playerLevelCoroutine;
         public static bool isReady = false;
         private bool nameTagCreated;
-        public static ConfigEntry<bool> EnableLevelPanel;
-        public static ConfigEntry<bool> EnableContextMenu;
+        public static ConfigEntry<bool> enableLevelPanel;
+        public static ConfigEntry<bool> enableContextMenu;
         private string nameCache;
-        private bool atMM;
+        private bool atMm;
         private JObject lastPayload = null;
         public static MultiplayerPatchPlugin instance;
 
 
 
-        public static readonly Dictionary<string, PlayerData> players = new Dictionary<string, PlayerData>();
+        public static readonly Dictionary<string, PlayerData> Players = new Dictionary<string, PlayerData>();
 
         private void Awake()
         {
@@ -126,7 +126,7 @@ namespace Multi_bloob_adventure_idle
                     string type = msg["type"]?.ToString();
                     if (type == null) continue;
 
-                    lock (players)
+                    lock (Players)
                     {
                         switch (type)
                         {
@@ -136,14 +136,14 @@ namespace Multi_bloob_adventure_idle
                                     var pd = token.ToObject<PlayerData>();
                                     if (pd.name == SteamClient.Name) continue;
 
-                                    players[pd.name] = pd;
+                                    Players[pd.name] = pd;
                                 }
                                 break;
                             case "newPlayer":
                                 {
                                     var pd = msg["data"].ToObject<PlayerData>();
                                     if (pd.name != SteamClient.Name)
-                                        players[pd.name] = pd;
+                                        Players[pd.name] = pd;
                                 }
                                 break;
                             case "update":
@@ -152,7 +152,7 @@ namespace Multi_bloob_adventure_idle
                                     if (string.IsNullOrEmpty(name) || name == SteamClient.Name)
                                         break;
 
-                                    if (players.TryGetValue(name, out var existing))
+                                    if (Players.TryGetValue(name, out var existing))
                                     {
                                         foreach (var prop in msg.Properties())
                                         {
@@ -180,7 +180,7 @@ namespace Multi_bloob_adventure_idle
                                                     break;
                                             }
                                         }
-                                        players[name] = existing;
+                                        Players[name] = existing;
                                     }
                                 }
                                 break;
@@ -203,33 +203,31 @@ namespace Multi_bloob_adventure_idle
         public async void OnActiveSceneChanged(Scene current, Scene next)
         {
             //Scene current doesn't ever instantiate, only use Scene next
-            Debug.Log($"Next Scene {next.name}");
-            switch (next.name)
+            //Debug.Log($"Next Scene {next.name}");
+            if (next.name != "GameCloud") return;
+            // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
+            await Task.Delay(TimeSpan.FromSeconds(7));
+            // We check if Steam has initialized, if it hasn't in time we wait 5 seconds and try again. Ensuring no issues on timings
+            if (!SteamClient.IsValid)
             {
-                case "GameCloud":
-                    // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
-                    await Task.Delay(TimeSpan.FromSeconds(7));
-                    // We check if Steam has initialized, if it hasn't in time we wait 5 seconds and try again. Ensuring no issues on timings
-                    if (!SteamClient.IsValid)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(5));
-                        OnActiveSceneChanged(current, next);
-                        return;
-                    }
-                    isReady = true;
-                    new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
-                    new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
-                    ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
-                    //playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
-                    positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
-                    AddsettingOptions();
-                    if (atMM)
-                    {
-                        ws.Send(lastPayload.ToString(Formatting.None));
-                    }
-                    break;
+                await Task.Delay(TimeSpan.FromSeconds(5));
+                OnActiveSceneChanged(current, next);
+                return;
             }
-
+            isReady = true;
+            new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
+            new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
+            //BUG Context menu spams errors, currently non-functional.
+            //new GameObject("Multiplayer Context Menu").AddComponent<MultiplayerContextMenu>();
+            ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
+            //playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
+            positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
+            AddsettingOptions();
+            if (atMm)
+            {
+                ws.Send(lastPayload.ToString(Formatting.None));
+                atMm = false;
+            }
         }
 
 
@@ -238,9 +236,9 @@ namespace Multi_bloob_adventure_idle
             var clone = GameObject.Find($"BloobClone_{name}");
             if (clone == null) return;
             CloneManager.RemoveClone(clone);
-            lock (players)
+            lock (Players)
             {
-                players.Remove(name);
+                Players.Remove(name);
             }
         }
 
@@ -248,7 +246,7 @@ namespace Multi_bloob_adventure_idle
         private Dictionary<string, (int, int)> UpdatePlayerLevels()
         {
 
-            Dictionary<string, string> NameMap = new()
+            Dictionary<string, string> nameMap = new()
             {
                 { "WoodCutting", "Woodcutting" }
 
@@ -265,7 +263,7 @@ namespace Multi_bloob_adventure_idle
                     continue; // CUNT
                 }
 
-                string childName = NameMap.TryGetValue(child.name, out var value) ? value : child.name;
+                string childName = nameMap.TryGetValue(child.name, out var value) ? value : child.name;
 
                 string skillClassName = childName + "Skill";
 
@@ -391,9 +389,9 @@ namespace Multi_bloob_adventure_idle
                     nameTagCreated = true;
                 }
 
-                lock (players)
+                lock (Players)
                 {
-                    foreach (var kvp in players)
+                    foreach (var kvp in Players)
                     {
                         if (kvp.Key == nameCache)
                             continue;
@@ -517,9 +515,9 @@ namespace Multi_bloob_adventure_idle
 
         private void HandleConfiguration()
         {
-            EnableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
+            enableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
                 "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
-            EnableContextMenu = Config.Bind("Visual", "Enable Context Menu", true,
+            enableContextMenu = Config.Bind("Visual", "Enable Context Menu", true,
                 "Enables a context menu when you right click to display overlapping ghosts");
         }
 
@@ -528,18 +526,24 @@ namespace Multi_bloob_adventure_idle
             ghostPlayerCoroutine = null;
             positionCoroutine = null;
             isReady = false;
-            var GO = GameObject.Find("HoverUIManager");
-            var GO1 = GameObject.Find("HoverDetector");
-            if (GO != null)
+            var go = GameObject.Find("HoverUIManager");
+            var go1 = GameObject.Find("HoverDetector");
+            //var go2 = GameObject.Find("Multiplayer Context Menu");
+            if (go)
             {
-                Destroy(GO);
+                Destroy(go);
             }
-            if (GO1 != null)
+            if (go1)
             {
-                Destroy(GO1);
+                Destroy(go1);
             }
 
-            atMM = true;
+            //if (go2)
+            //{
+                //Destroy(go2);
+            //}
+
+            atMm = true;
             var payload = new
             {
                 type = "RemoveClient",
@@ -616,9 +620,9 @@ namespace Multi_bloob_adventure_idle
             Debug.Log("Sound Off Found");
 
             // Add toggles
-            AddButton(settingsUi, "Enable Level Panel", EnableLevelPanel, new Vector2(150, 40));
+            AddButton(settingsUi, "Enable Level Panel", enableLevelPanel, new Vector2(150, 40));
             //TODO Setup handling of creating/destroying of context menu behaviour on toggle to clean up properly
-            AddButton(settingsUi, "Enable Context Menu", EnableContextMenu, new Vector2(150, 55));
+            AddButton(settingsUi, "Enable Context Menu", enableContextMenu, new Vector2(150, 55));
 
         }
 

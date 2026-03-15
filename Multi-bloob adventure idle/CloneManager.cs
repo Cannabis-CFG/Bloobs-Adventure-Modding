@@ -20,12 +20,12 @@ namespace Multi_bloob_adventure_idle
             obj.name = "BloobClone_" + playerData.name;
             obj.AddComponent<IsMultiplayerClone>();
 
-            var clone = new Clone(playerData.name, obj);
+            Clone clone = new Clone(playerData.name, obj);
 
             clone.SetColor(playerData.bloobColour.ToColor());
             clone.SetPosition(playerData.currentPosition.ToVector3());
 
-            // Remove unwanted stuff:
+            // Remove unwanted stuff
             foreach (var collider in obj.GetComponents<CircleCollider2D>())
                 Object.Destroy(collider);
 
@@ -76,23 +76,19 @@ namespace Multi_bloob_adventure_idle
         public IEnumerable<Clone> GetAllClones() => _clones.Values;
     }
 
-    public class Clone
+    public class Clone(string playerName, GameObject obj)
     {
-        public string PlayerName { get; }
-        public GameObject GameObject { get; }
+        public string PlayerName { get; } = playerName;
+        public GameObject GameObject { get; } = obj;
         public CharacterMovement Movement => GameObject.GetComponent<CharacterMovement>();
 
-        public Clone(string playerName, GameObject obj)
-        {
-            PlayerName = playerName;
-            GameObject = obj;
-        }
-
+        //BUG NRE at GetComponent at unknown times, did not catch error live. Only happened 1 time so far.
         public void SetColor(Color color)
         {
             var renderer = GameObject.GetComponent<SpriteRenderer>();
-            if (renderer)
-                renderer.color = color;
+            if (!renderer) return;
+            renderer.color = color;
+
         }
 
         public void SetPosition(Vector3 pos)
@@ -101,12 +97,9 @@ namespace Multi_bloob_adventure_idle
             if (cm)
             {
                 cm.StopMoving();
-                GameObject.transform.position = pos;
             }
-            else
-            {
-                GameObject.transform.position = pos;
-            }
+
+            GameObject.transform.position = pos;
         }
 
         public void UpdateCustomizations(string slot, string asset)
@@ -118,15 +111,15 @@ namespace Multi_bloob_adventure_idle
         public void MoveTo(Vector2 target, float speed = -1f)
         {
             var cm = Movement;
-            if (cm)
-            {
-                if (speed > 0)
-                    cm.moveSpeed = speed;
-
-                cm.MoveTo(target);
-            }
+            if (!cm) return;
+            if (Vector2.Distance(target, ToVector2(GameObject.transform.position)) >= 400f)
+                speed = 400f;
+            if (speed > 0)
+                cm.moveSpeed = speed;
+            cm.MoveTo(target);
         }
 
+        private Vector2 ToVector2(Vector3 vector3) => new Vector2(vector3.x, vector3.y);
     }
 
 }

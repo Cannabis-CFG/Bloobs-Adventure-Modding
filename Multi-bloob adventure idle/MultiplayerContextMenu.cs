@@ -1,6 +1,9 @@
-﻿using System.Linq;
+﻿using System.Collections;
+using System.Linq;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 
@@ -8,28 +11,34 @@ namespace Multi_bloob_adventure_idle
 {
     public class MultiplayerContextMenu : MonoBehaviour
     {
-        public Canvas UICanvas;          
-        public GameObject ButtonPrefab;  
+        public Canvas uiCanvas;
+        public GameObject buttonPrefab;
 
-        private GameObject _menuGO;
-        private RectTransform _menuRT;
-        private float _closeMargin = 10f;  
+        private GameObject menuGo;
+        private RectTransform menuRT;
+        private const float CloseMargin = 10f;
+        private const float BtnHeight = 30f;
+        private const float Padding = 4f;
         public static bool IsContextMenuOpen { get; private set; }
+
+
+        void Awake()
+        {
+            // ensure EventSystem exists
+            if (FindObjectOfType<EventSystem>() == null)
+                new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+
+            var go = GameObject.Find("HoverCanvas");
+            uiCanvas = go.GetComponent<Canvas>();
+        }
 
         void Update()
         {
-            if (Input.GetMouseButtonDown(1))
+            if (Input.GetMouseButtonDown(1) && MultiplayerPatchPlugin.enableContextMenu.Value)
             {
                 TryShowMenu();
             }
 
-            if (!_menuGO) return;
-            Vector2 mousePos = Input.mousePosition;
-            if (RectTransformUtility.RectangleContainsScreenPoint(
-                    _menuRT, mousePos, null,
-                    new Vector4(_closeMargin, _closeMargin, _closeMargin, _closeMargin))) return;
-            CloseMenu();
-            HoverUIManager.Instance.HideInfo();
         }
 
         private void TryShowMenu()
@@ -38,86 +47,114 @@ namespace Multi_bloob_adventure_idle
             Camera cam = MultiplayerHoverDetector.cam;
             Vector3 wp3 = cam.ScreenToWorldPoint(Input.mousePosition);
             Vector2 wp2 = new Vector2(wp3.x, wp3.y);
-
+            if (!cam)
+            {
+                Debug.LogError("Camera is null");
+                return;
+            }
             var hits = GameObject.FindObjectsOfType<IsMultiplayerClone>()
                 .Where(c =>
                 {
                     var sr = c.GetComponent<SpriteRenderer>();
-                    return sr != null &&
-                           sr.bounds.Contains(new Vector3(wp2.x, wp2.y, sr.bounds.center.z));
+                    return sr
+                        && sr.bounds.Contains(new Vector3(wp2.x, wp2.y, sr.bounds.center.z));
                 })
                 .ToList();
 
             if (hits.Count <= 1)
-                return;  
+                return;
 
-            
-            if (_menuGO) Destroy(_menuGO);
+            if (menuGo)
+                Destroy(menuGo);
 
-            
-            _menuGO = new GameObject("CloneContextMenu", typeof(RectTransform), typeof(Image));
-            _menuGO.transform.SetParent(UICanvas.transform, false);
-            _menuRT = _menuGO.GetComponent<RectTransform>();
-            IsContextMenuOpen = true;
-            var bg = _menuGO.GetComponent<Image>();
+            menuGo = new GameObject("CloneContextMenu", typeof(RectTransform), typeof(Image));
+            menuGo.transform.SetParent(uiCanvas.transform, false);
+            menuRT = menuGo.GetComponent<RectTransform>();
+
+            var bg = menuGo.GetComponent<Image>();
             bg.color = new Color32(30, 30, 30, 220);
 
-            
-            float btnH = 30f, padding = 4f;
-            _menuRT.sizeDelta = new Vector2(150f, hits.Count * (btnH + padding) + padding);
-            _menuRT.pivot = new Vector2(0, 1);
-            _menuRT.anchoredPosition = Input.mousePosition / UICanvas.scaleFactor;
+            float width = 160f;
+            float height = hits.Count * (BtnHeight + Padding) + Padding;
+            menuRT.sizeDelta = new Vector2(width, height);
+            menuRT.pivot = new Vector2(0, 1);
+            menuRT.anchoredPosition = Input.mousePosition / uiCanvas.scaleFactor;
 
-            
-            for (int i = 0; i < hits.Count; i++)
+            foreach (var kv in hits.Select((c, i) => (c, i)))
             {
-                var clone = hits[i];
-                string cloneName = clone.name.Replace("BloobClone_", "");
+                var clone = kv.c;
+                int idx = kv.i;
+                string nameKey = clone.name.Replace("BloobClone_", "");
 
-                
-                var btnGO = Instantiate(ButtonPrefab, _menuRT);
-                var btnRT = btnGO.GetComponent<RectTransform>();
+                var btnGo = new GameObject("Btn_" + nameKey, typeof(RectTransform), typeof(Image), typeof(Button));
+                btnGo.transform.SetParent(menuGo.transform, false);
+                var btnRT = btnGo.GetComponent<RectTransform>();
                 btnRT.anchorMin = new Vector2(0, 1);
                 btnRT.anchorMax = new Vector2(1, 1);
                 btnRT.pivot = new Vector2(0, 1);
-                btnRT.anchoredPosition = new Vector2(padding, -padding - i * (btnH + padding));
-                btnRT.sizeDelta = new Vector2(-2 * padding, btnH);
+                btnRT.sizeDelta = new Vector2(-2 * Padding, BtnHeight);
+                btnRT.anchoredPosition = new Vector2(Padding, -Padding - idx * (BtnHeight + Padding));
 
-                
-                var label = btnGO.GetComponentInChildren<TextMeshProUGUI>();
-                label.text = cloneName;
+                var img = btnGo.GetComponent<Image>();
+                img.color = new Color32(50, 50, 50, 200);
 
-                
-                var trigger = btnGO.AddComponent<UnityEngine.EventSystems.EventTrigger>();
-                var entry = new UnityEngine.EventSystems.EventTrigger.Entry
+                var textGo = new GameObject("Label", typeof(RectTransform));
+                textGo.transform.SetParent(btnGo.transform, false);
+                var textRT = textGo.GetComponent<RectTransform>();
+                textRT.anchorMin = Vector2.zero;
+                textRT.anchorMax = Vector2.one;
+                textRT.offsetMin = Vector2.zero;
+                textRT.offsetMax = Vector2.zero;
+
+                var tmp = textGo.AddComponent<TextMeshProUGUI>();
+                tmp.text = nameKey;
+                tmp.fontSize = 18;
+                tmp.alignment = TextAlignmentOptions.Center;
+                tmp.color = Color.white;
+
+                var trigger = btnGo.AddComponent<EventTrigger>();
+
+                var enter = new EventTrigger.Entry
                 {
-                    eventID = UnityEngine.EventSystems.EventTriggerType.PointerEnter
+                    eventID = EventTriggerType.PointerEnter
                 };
-                entry.callback.AddListener(_ => ShowCloneInfo(cloneName));
-                trigger.triggers.Add(entry);
+                enter.callback.AddListener(_ => ShowCloneInfo(nameKey));
+                trigger.triggers.Add(enter);
 
-                var exitEntry = new UnityEngine.EventSystems.EventTrigger.Entry
+                var exit = new EventTrigger.Entry
                 {
-                    eventID = UnityEngine.EventSystems.EventTriggerType.PointerExit
+                    eventID = EventTriggerType.PointerExit
                 };
-                exitEntry.callback.AddListener(_ => HoverUIManager.Instance.HideInfo());
-                trigger.triggers.Add(exitEntry);
+                exit.callback.AddListener(_ => HoverUIManager.Instance.HideInfo());
+                trigger.triggers.Add(exit);
             }
+            StartCoroutine(AutoCloseMenu(uiCanvas));
         }
 
         private void ShowCloneInfo(string name)
         {
-            if (MultiplayerPatchPlugin.players.TryGetValue(name, out var pd))
+            if (MultiplayerPatchPlugin.Players.TryGetValue(name, out var pd))
             {
                 string info = MultiplayerHoverDetector.BuildHoverInfo(name, pd);
                 HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);
             }
         }
 
-        private void CloseMenu()
+        private IEnumerator AutoCloseMenu(Canvas canvas)
         {
-            Destroy(_menuGO);
-            IsContextMenuOpen = false;
+            while (menuGo)
+            {
+                Vector2 mpos = Input.mousePosition / canvas.scaleFactor;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(
+                        menuRT, mpos, null,
+                        new Vector4(CloseMargin, CloseMargin, CloseMargin, CloseMargin)))
+                {
+                    Destroy(menuGo);
+                    HoverUIManager.Instance.HideInfo();
+                    yield break;
+                }
+                yield return null;
+            }
         }
     }
 }
