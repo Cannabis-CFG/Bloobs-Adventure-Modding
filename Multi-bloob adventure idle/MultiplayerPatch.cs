@@ -16,15 +16,11 @@ using UnityEngine.UI;
 using WebSocketSharp;
 using Image = UnityEngine.UI.Image;
 
-
-
-
 namespace Multi_bloob_adventure_idle
 {
     [BepInPlugin("com.cannabis.multibloobidle", "Multiblood Adventure Idle", "1.0.0")]
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
-
         private readonly Queue<string> messageQueue = new Queue<string>();
         private readonly object queueLock = new object();
         public static Dictionary<string, (int level, int prestige)> playerSkills = new Dictionary<string, (int level, int prestige)>();
@@ -32,6 +28,7 @@ namespace Multi_bloob_adventure_idle
         private WebSocket ws;
         private bool isConnected = false;
         private bool isMonitoringConnection;
+        private Coroutine connectionMonitorCoroutine;
 
         private Coroutine positionCoroutine;
         private Coroutine ghostPlayerCoroutine;
@@ -41,25 +38,55 @@ namespace Multi_bloob_adventure_idle
         public static ConfigEntry<bool> enableLevelPanel;
         public static ConfigEntry<bool> enableContextMenu;
         private string nameCache;
+        private string steamIdCache;
         private bool atMm;
         private JObject lastPayload = null;
         public static MultiplayerPatchPlugin instance;
 
-
-
         public static readonly Dictionary<string, PlayerData> Players = new Dictionary<string, PlayerData>();
+
+        private const string WebSocketUrl = "ws://172.93.111.163:42069";
 
         private void Awake()
         {
             //Debug.Log("Starting to wake up");
             // WebServer Connection
-            ws = new WebSocket("ws://172.93.111.163:42069");
+            InitializeWebSocket();
+            ws.ConnectAsync();
+
+            Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(CharacterMovementCloseAllShopsPatch));
+            Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
+            Harmony.CreateAndPatchAll(typeof(BloobColourChangeWingPatch));
+            Harmony.CreateAndPatchAll(typeof(BloobColourChangeHatPatch));
+
+            if (ws == null) { Debug.Log("WS NULL"); }
+            //Debug.Log("Fully woken up");
+            SceneManager.activeSceneChanged += OnActiveSceneChanged;
+            //StartCoroutine(ConnectionMonitorCoroutine());
+            HandleConfiguration();
+            instance ??= this;
+        }
+
+        private void InitializeWebSocket()
+        {
+            ws = new WebSocket(WebSocketUrl);
+            HookWebSocketEvents();
+        }
+
+        private void HookWebSocketEvents()
+        {
             ws.OnOpen += (sender, e) =>
             {
                 isConnected = true;
                 Debug.Log("WebSocket Connected.");
             };
-            ws.OnError += (sender, e) => { Debug.Log("WebSocket Error:" + e.Message); };
+
+            ws.OnError += (sender, e) =>
+            {
+                Debug.Log("WebSocket Error:" + e.Message);
+            };
+
             ws.OnClose += (sender, e) =>
             {
                 isConnected = false;
@@ -69,9 +96,10 @@ namespace Multi_bloob_adventure_idle
                 if (e.Code != 1000)
                 {
                     Debug.LogWarning("Connection was closed abnormally");
-                    StartCoroutine(ConnectionMonitorCoroutine());
+                    BeginConnectionMonitor();
                 }
             };
+
             ws.OnMessage += (sender, e) =>
             {
                 lock (queueLock)
@@ -79,32 +107,54 @@ namespace Multi_bloob_adventure_idle
                     messageQueue.Enqueue(e.Data);
                 }
             };
-
-            ws.ConnectAsync();
-            Harmony.CreateAndPatchAll(typeof(CharacterMovementUpdatePatch));
-            Harmony.CreateAndPatchAll(typeof(CharacterMovementCloseAllShopsPatch));
-            Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
-            Harmony.CreateAndPatchAll(typeof(BloobColourChangeWingPatch));
-            if (ws == null) { Debug.Log("WS NULL");};
-            //Debug.Log("Fully woken up");
-            SceneManager.activeSceneChanged += OnActiveSceneChanged;
-            //StartCoroutine(ConnectionMonitorCoroutine());
-            HandleConfiguration();
-            instance ??= this;
         }
 
+        private void RebuildWebSocket()
+        {
+            try
+            {
+                if (ws != null)
+                {
+                    try
+                    {
+                        ws.CloseAsync();
+                    }
+                    catch
+                    {
+                        // Ignore close errors during rebuild
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore cleanup errors during rebuild
+            }
+
+            InitializeWebSocket();
+        }
 
         private void OnApplicationQuit()
         {
-            ws.Close();
+            try
+            {
+                ws?.Close();
+            }
+            catch
+            {
+                // Ignore close exceptions on quit
+            }
         }
-
 
         private void Update()
         {
             if (!isReady || !SteamClient.IsValid)
                 return;
-            if (nameCache.IsNullOrEmpty()) nameCache = SteamClient.Name;
+
+            if (string.IsNullOrEmpty(nameCache))
+                nameCache = SteamClient.Name;
+
+            if (string.IsNullOrEmpty(steamIdCache))
+                steamIdCache = SteamClient.SteamId.ToString();
 
             lock (queueLock)
             {
@@ -131,82 +181,148 @@ namespace Multi_bloob_adventure_idle
                         switch (type)
                         {
                             case "initialState":
-                                foreach (var token in (JArray)msg["data"])
                                 {
-                                    var pd = token.ToObject<PlayerData>();
-                                    if (pd.name == SteamClient.Name) continue;
-
-                                    Players[pd.name] = pd;
-                                }
-                                break;
-                            case "newPlayer":
-                                {
-                                    var pd = msg["data"].ToObject<PlayerData>();
-                                    if (pd.name != SteamClient.Name)
-                                        Players[pd.name] = pd;
-                                }
-                                break;
-                            case "update":
-                                {
-                                    string name = msg["name"]?.ToString();
-                                    if (string.IsNullOrEmpty(name) || name == SteamClient.Name)
+                                    var dataArray = msg["data"] as JArray;
+                                    if (dataArray == null)
                                         break;
 
-                                    if (Players.TryGetValue(name, out var existing))
+                                    foreach (var token in dataArray)
                                     {
-                                        foreach (var prop in msg.Properties())
-                                        {
-                                            switch (prop.Name)
-                                            {
-                                                case "currentPosition":
-                                                    existing.currentPosition = prop.Value
-                                                        .ToObject<Vector3Like>();
-                                                    break;
-                                                case "runSpeed":
-                                                    existing.runSpeed = prop.Value
-                                                        .ToObject<float>();
-                                                    break;
-                                                case "cloneData":
-                                                    existing.soulData = prop.Value
-                                                        .ToObject<string[]>();
-                                                    break;
-                                                case "bloobColour":
-                                                    existing.bloobColour = prop.Value
-                                                        .ToObject<ColourLike>();
-                                                    break;
-                                                case "skillData":
-                                                    existing.skillData = prop.Value
-                                                        .ToObject<Dictionary<string, (int level, int prestige)>>();
-                                                    break;
-                                            }
-                                        }
-                                        Players[name] = existing;
+                                        var pd = token.ToObject<PlayerData>();
+                                        if (pd == null || string.IsNullOrWhiteSpace(pd.steamId))
+                                            continue;
+
+                                        if (pd.steamId == steamIdCache)
+                                            continue;
+
+                                        Players[pd.steamId] = pd;
                                     }
                                 }
                                 break;
-                            case "clientRemoved":
-                            case "disconnect":
+
+                            case "newPlayer":
                                 {
-                                    string name = msg["name"]?.ToString();
-                                    if (!string.IsNullOrEmpty(name))
-                                        HandleClientDisconnect(name);
+                                    var dataToken = msg["data"];
+                                    if (dataToken == null)
+                                        break;
+
+                                    var pd = dataToken.ToObject<PlayerData>();
+                                    if (pd == null || string.IsNullOrWhiteSpace(pd.steamId))
+                                        break;
+
+                                    if (pd.steamId != steamIdCache)
+                                        Players[pd.steamId] = pd;
                                 }
                                 break;
 
+                            case "update":
+                                {
+                                    string steamId = msg["steamId"]?.ToString();
+                                    string name = msg["name"]?.ToString();
+
+                                    // Prefer SteamID. Fallback to name only if older server packet shape still exists.
+                                    PlayerData existing = null;
+                                    string resolvedSteamId = steamId;
+
+                                    if (!string.IsNullOrWhiteSpace(steamId) && Players.TryGetValue(steamId, out existing))
+                                    {
+                                        // already found
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(name))
+                                    {
+                                        existing = Players.Values.FirstOrDefault(p =>
+                                            p != null &&
+                                            !string.IsNullOrWhiteSpace(p.name) &&
+                                            p.name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+                                        if (existing != null)
+                                            resolvedSteamId = existing.steamId;
+                                    }
+
+                                    if (existing == null || string.IsNullOrWhiteSpace(resolvedSteamId))
+                                        break;
+
+                                    foreach (var prop in msg.Properties())
+                                    {
+                                        switch (prop.Name)
+                                        {
+                                            case "currentPosition":
+                                                existing.currentPosition = prop.Value.ToObject<Vector3Like>();
+                                                break;
+                                            case "runSpeed":
+                                                existing.runSpeed = prop.Value.ToObject<float>();
+                                                break;
+                                            case "cloneData":
+                                                existing.soulData = prop.Value.ToObject<string[]>();
+                                                break;
+                                            case "bloobColour":
+                                                existing.bloobColour = prop.Value.ToObject<ColourLike>();
+                                                break;
+                                            case "skillData":
+                                                existing.skillData = prop.Value.ToObject<Dictionary<string, SkillTupleDto>>()
+                                                    ?.ToDictionary(kvp => kvp.Key, kvp => (kvp.Value.Item1, kvp.Value.Item2))
+                                                    ?? new Dictionary<string, (int level, int prestige)>();
+                                                break;
+                                            case "name":
+                                                existing.name = prop.Value.ToObject<string>();
+                                                break;
+                                            case "steamId":
+                                                existing.steamId = prop.Value.ToObject<string>();
+                                                break;
+                                        }
+                                    }
+
+                                    Players[resolvedSteamId] = existing;
+                                }
+                                break;
+
+                            case "clientRemoved":
+                            case "disconnect":
+                                {
+                                    string steamId = msg["steamId"]?.ToString();
+                                    string name = msg["name"]?.ToString();
+                                    HandleClientDisconnect(steamId, name);
+                                }
+                                break;
+
+                            case "chatHistory":
+                                {
+                                    ChatSystem.Instance?.ReceiveHistory(msg["messages"] as JArray);
+                                }
+                                break;
+
+                            case "chatMessage":
+                                {
+                                    ChatSystem.Instance?.ReceiveChatMessage(msg);
+                                }
+                                break;
+
+                            case "serverBroadcast":
+                                {
+                                    ChatSystem.Instance?.ReceiveBroadcast(msg);
+                                }
+                                break;
+
+                            case "chatError":
+                                {
+                                    ChatSystem.Instance?.ReceiveError(msg["error"]?.ToString() ?? "Unknown chat error.");
+                                }
+                                break;
                         }
                     }
                 }
             }
         }
 
-
         public async void OnActiveSceneChanged(Scene current, Scene next)
         {
             //Scene current doesn't ever instantiate, only use Scene next
             //Debug.Log($"Next Scene {next.name}");
             if (next.name != "GameCloud") return;
+
             // We have to delay here because the Scene change to GameCloud happens quicker than everything can get instantiated
             await Task.Delay(TimeSpan.FromSeconds(7));
+
             // We check if Steam has initialized, if it hasn't in time we wait 5 seconds and try again. Ensuring no issues on timings
             if (!SteamClient.IsValid)
             {
@@ -214,50 +330,100 @@ namespace Multi_bloob_adventure_idle
                 OnActiveSceneChanged(current, next);
                 return;
             }
+
             isReady = true;
             new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
             new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
             //BUG Context menu spams errors, currently non-functional.
             //new GameObject("Multiplayer Context Menu").AddComponent<MultiplayerContextMenu>();
+            ChatSystem.Create(Config);
             ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
             //playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
             positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
             AddsettingOptions();
-            if (atMm)
+
+            if (atMm && lastPayload != null && ws != null && ws.IsAlive)
             {
                 ws.Send(lastPayload.ToString(Formatting.None));
                 atMm = false;
             }
         }
 
-
-        public void HandleClientDisconnect(string name)
+        public void HandleClientDisconnect(string steamId, string name = null)
         {
-            var clone = GameObject.Find($"BloobClone_{name}");
-            if (clone == null) return;
-            CloneManager.RemoveClone(clone);
+            string resolvedSteamId = steamId;
+
             lock (Players)
             {
-                Players.Remove(name);
+                if (string.IsNullOrWhiteSpace(resolvedSteamId) && !string.IsNullOrWhiteSpace(name))
+                {
+                    var byName = Players.Values.FirstOrDefault(p =>
+                        p != null &&
+                        !string.IsNullOrWhiteSpace(p.name) &&
+                        p.name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+                    if (byName != null)
+                        resolvedSteamId = byName.steamId;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(resolvedSteamId))
+                return;
+
+            CloneManager.RemoveCloneBySteamId(resolvedSteamId);
+
+            lock (Players)
+            {
+                Players.Remove(resolvedSteamId);
             }
         }
 
+        public static PlayerData FindPlayerByName(string playerName)
+        {
+            lock (Players)
+            {
+                return Players.Values.FirstOrDefault(p =>
+                    p != null &&
+                    !string.IsNullOrWhiteSpace(p.name) &&
+                    p.name.Equals(playerName, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        public static List<PlayerData> FindPlayersByPartialName(string partialName)
+        {
+            if (string.IsNullOrWhiteSpace(partialName))
+                return new List<PlayerData>();
+
+            string search = partialName.Trim();
+
+            lock (Players)
+            {
+                return Players.Values
+                    .Where(p =>
+                        p != null &&
+                        !string.IsNullOrWhiteSpace(p.name) &&
+                        p.name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .OrderBy(p => p.name.Length)
+                    .ThenBy(p => p.name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+        }
 
         private Dictionary<string, (int, int)> UpdatePlayerLevels()
         {
-
             Dictionary<string, string> nameMap = new()
             {
                 { "WoodCutting", "Woodcutting" }
-
             };
 
             Dictionary<string, (int level, int prestige)> skillData = new();
 
             GameObject player = GameObject.Find("BloobCharacter");
+            if (player == null)
+                return skillData;
+
             foreach (Transform child in player.transform)
             {
-
                 if (child.name is null or "Weapon Point" or "MagicWeapon Point" or "RangeWeapon Point" or "Melee Weapon" or "MeleeWeapon" or "MagicProjectile" or "RangeProjectile" or "wingSlot" or "hatSlot" or "Canvas")
                 {
                     continue; // CUNT
@@ -270,7 +436,6 @@ namespace Multi_bloob_adventure_idle
                 // Skill Class Name edge cases
                 if (childName == "SoulBinding")
                     skillClassName = "SoulBinding";
-
 
                 // Try to get the component dynamically
                 Component skillComponent = child.GetComponent(skillClassName);
@@ -350,6 +515,9 @@ namespace Multi_bloob_adventure_idle
 
         public void ApplyLocalNametag(GameObject player)
         {
+            var existing = player.transform.Find("LocalNamePlate");
+            if (existing != null)
+                return;
 
             var namePlate = new GameObject("LocalNamePlate");
             namePlate.transform.SetParent(player.transform, false);
@@ -365,23 +533,24 @@ namespace Multi_bloob_adventure_idle
             mr.sortingLayerName = "UI";
         }
 
-
         IEnumerator UpdateGhostPlayers()
         {
-            GameObject original = GameObject.Find("BloobCharacter");
-            if (original is null)
-            {
-                Debug.LogWarning("BloobCharacter not found.");
-                yield return new WaitForSecondsRealtime(5f);
-            }
             while (true)
             {
                 if (!isReady)
                 {
                     Debug.Log("Game not ready, retrying ghost player update in 15 seconds");
                     yield return new WaitForSecondsRealtime(15f);
+                    continue;
                 }
 
+                GameObject original = GameObject.Find("BloobCharacter");
+                if (original is null)
+                {
+                    Debug.LogWarning("BloobCharacter not found.");
+                    yield return new WaitForSecondsRealtime(5f);
+                    continue;
+                }
 
                 if (!nameTagCreated)
                 {
@@ -393,17 +562,20 @@ namespace Multi_bloob_adventure_idle
                 {
                     foreach (var kvp in Players)
                     {
-                        if (kvp.Key == nameCache)
+                        var pd = kvp.Value;
+                        if (pd == null || string.IsNullOrWhiteSpace(pd.steamId))
                             continue;
 
-                        CloneManager.UpdateOrCreateClone(original, kvp.Value);
-                        
+                        if (pd.steamId == steamIdCache)
+                            continue;
+
+                        CloneManager.UpdateOrCreateClone(original, pd);
                     }
                 }
+
                 yield return new WaitForSecondsRealtime(1f);
             }
         }
-
 
         IEnumerator GetPositionEnumerator()
         {
@@ -413,13 +585,22 @@ namespace Multi_bloob_adventure_idle
                 {
                     Debug.Log("Game not ready, retrying position coroutine in 15 seconds");
                     yield return new WaitForSecondsRealtime(15);
+                    continue;
                 }
+
                 GameObject player = GameObject.Find("BloobCharacter");
+                if (player == null)
+                {
+                    yield return new WaitForSecondsRealtime(1f);
+                    continue;
+                }
+
                 string[] soulData = Array.Empty<string>();
 
                 var payload = new
                 {
                     name = SteamClient.Name,
+                    steamId = SteamClient.SteamId.ToString(),
                     currentPosition = new
                     {
                         x = Mathf.Round(player.transform.position.x),
@@ -427,7 +608,9 @@ namespace Multi_bloob_adventure_idle
                         z = Mathf.Round(player.transform.position.z)
                     },
                     isDisconnecting = false,
-                    skillData = UpdatePlayerLevels(),
+                    skillData = UpdatePlayerLevels().ToDictionary(
+                        kvp => kvp.Key,
+                        kvp => new SkillTupleDto { Item1 = kvp.Value.Item1, Item2 = kvp.Value.Item2 }),
                     bloobColour = new ColourLike()
                     {
                         //playerGameObject.GetComponent<SpriteRenderer>().color
@@ -436,7 +619,7 @@ namespace Multi_bloob_adventure_idle
                         g = player.GetComponent<SpriteRenderer>().color.g,
                         r = player.GetComponent<SpriteRenderer>().color.r
                     },
-                    runSpeed = player.GetComponent<CharacterMovement>()?.dexteritySkill.runSpeed,
+                    runSpeed = player.GetComponent<CharacterMovement>()?.dexteritySkill.runSpeed ?? 0f,
                     cloneData = soulData
                 };
 
@@ -444,74 +627,165 @@ namespace Multi_bloob_adventure_idle
 
                 var diffPayload = new JObject
                 {
-                    ["name"] = newPayload["name"]
+                    ["name"] = newPayload["name"],
+                    ["steamId"] = newPayload["steamId"]
                 };
 
                 foreach (var property in newPayload.Properties())
                 {
-                    if (property.Name == "name") continue;
+                    if (property.Name == "name" || property.Name == "steamId") continue;
+
                     if (lastPayload == null || !JToken.DeepEquals(property.Value, lastPayload[property.Name]))
                     {
                         diffPayload[property.Name] = property.Value;
                     }
                 }
 
-                if (diffPayload.Properties().Count() > 1)
+                if (diffPayload.Properties().Count() > 2)
                 {
                     //TODO Send through Binary serialization, decreases payload and faster to de/serialize
                     string jsonPayload = diffPayload.ToString(Formatting.None);
                     //Debug.Log($"Sending data: {jsonPayload} to server");
-                    ws.Send(jsonPayload);
+                    if (ws != null && ws.IsAlive)
+                    {
+                        ws.Send(jsonPayload);
+                    }
                     lastPayload = newPayload;
                 }
+
                 //Debug.Log("Hey shithead");
                 yield return new WaitForSecondsRealtime(1f);
             }
         }
 
-
-        private IEnumerator ConnectionMonitorCoroutine(int maxRetries = 5, float retryDelay = 5f, float checkInterval = 10f)
+        private void BeginConnectionMonitor()
         {
             if (isMonitoringConnection)
+                return;
+
+            connectionMonitorCoroutine = StartCoroutine(ConnectionMonitorCoroutine());
+        }
+
+        private IEnumerator ConnectionMonitorCoroutine()
+        {
+            if (isMonitoringConnection)
+                yield break;
+
+            isMonitoringConnection = true;
+            Debug.LogWarning("[WS] Connection monitor started.");
+
+            // 5 attempts
+            yield return TryReconnectBurst(5, 5f, "Burst 1/4");
+            if (IsSocketHealthy())
             {
+                OnReconnectSuccess();
                 yield break;
             }
 
-            while (true)
+            // wait 30 seconds
+            Debug.LogWarning("[WS] Reconnect burst 1 failed. Waiting 30 seconds before next burst.");
+            yield return new WaitForSecondsRealtime(30f);
+
+            // 5 attempts
+            yield return TryReconnectBurst(5, 5f, "Burst 2/4");
+            if (IsSocketHealthy())
             {
-                if (!isConnected || !ws.IsAlive)
-                {
-                    Debug.LogWarning("[WS] Lost connection — attempting to reconnect...");
-
-                    for (int attempt = 1; attempt <= maxRetries && !isConnected; attempt++)
-                    {
-                        Debug.Log($"[WS] Reconnect attempt {attempt}/{maxRetries}...");
-                        ws.ConnectAsync();
-
-                        float timer = 0f;
-                        while (timer < retryDelay && !isConnected)
-                        {
-                            timer += Time.deltaTime;
-                            yield return null;
-                        }
-                    }
-
-                    if (isConnected)
-                    {
-                        Debug.Log("[WS] Reconnected successfully! Reinitializing player data");
-                        ws.Send(lastPayload.ToString(Formatting.None));
-                        //StopCoroutine(ConnectionMonitorCoroutine());
-                        break;
-                    }
-
-                    else
-                        Debug.LogError($"[WS] Failed to reconnect after {maxRetries} attempts.");
-                }
-                yield return new WaitForSecondsRealtime(checkInterval);
+                OnReconnectSuccess();
+                yield break;
             }
+
+            // wait 60 seconds
+            Debug.LogWarning("[WS] Reconnect burst 2 failed. Waiting 60 seconds before next burst.");
+            yield return new WaitForSecondsRealtime(60f);
+
+            // 5 attempts
+            yield return TryReconnectBurst(5, 5f, "Burst 3/4");
+            if (IsSocketHealthy())
+            {
+                OnReconnectSuccess();
+                yield break;
+            }
+
+            // wait 5 minutes
+            Debug.LogWarning("[WS] Reconnect burst 3 failed. Waiting 5 minutes before final burst.");
+            yield return new WaitForSecondsRealtime(300f);
+
+            // 5 attempts
+            yield return TryReconnectBurst(5, 5f, "Burst 4/4");
+            if (IsSocketHealthy())
+            {
+                OnReconnectSuccess();
+                yield break;
+            }
+
+            Debug.LogError("[WS] Unable to reconnect to the multiplayer server after all retry stages.");
+            Debug.LogError("[WS] Please restart the game if you believe this is an issue or contact the developer of the mod if this issue persists through multiple restarts/days.");
+
             isMonitoringConnection = false;
+            connectionMonitorCoroutine = null;
         }
 
+        private IEnumerator TryReconnectBurst(int attempts, float delayBetweenAttempts, string label)
+        {
+            for (int attempt = 1; attempt <= attempts; attempt++)
+            {
+                if (IsSocketHealthy())
+                    yield break;
+
+                Debug.LogWarning($"[WS] {label} reconnect attempt {attempt}/{attempts}...");
+
+                RebuildWebSocket();
+                ws.ConnectAsync();
+
+                float timer = 0f;
+                while (timer < delayBetweenAttempts)
+                {
+                    if (IsSocketHealthy())
+                        yield break;
+
+                    timer += Time.unscaledDeltaTime;
+                    yield return null;
+                }
+            }
+        }
+
+        private bool IsSocketHealthy()
+        {
+            return isConnected && ws != null && ws.IsAlive;
+        }
+
+        private void OnReconnectSuccess()
+        {
+            Debug.Log("[WS] Reconnected successfully! Reinitializing player data");
+
+            if (lastPayload != null && ws != null && ws.IsAlive)
+            {
+                ws.Send(lastPayload.ToString(Formatting.None));
+            }
+
+            isMonitoringConnection = false;
+            connectionMonitorCoroutine = null;
+        }
+
+        public void SendChatPacket(string message)
+        {
+            if (ws == null || !isConnected || !ws.IsAlive || !SteamClient.IsValid)
+            {
+                ChatSystem.Instance?.ReceiveError("Chat is not connected right now.");
+                return;
+            }
+
+            var payload = new
+            {
+                type = "chat",
+                name = SteamClient.Name,
+                steamId = SteamClient.SteamId.ToString(),
+                message = message
+            };
+
+            string json = JsonConvert.SerializeObject(payload);
+            ws.Send(json);
+        }
 
         private void HandleConfiguration()
         {
@@ -526,13 +800,16 @@ namespace Multi_bloob_adventure_idle
             ghostPlayerCoroutine = null;
             positionCoroutine = null;
             isReady = false;
+
             var go = GameObject.Find("HoverUIManager");
             var go1 = GameObject.Find("HoverDetector");
             //var go2 = GameObject.Find("Multiplayer Context Menu");
+
             if (go)
             {
                 Destroy(go);
             }
+
             if (go1)
             {
                 Destroy(go1);
@@ -540,20 +817,30 @@ namespace Multi_bloob_adventure_idle
 
             //if (go2)
             //{
-                //Destroy(go2);
+            //    Destroy(go2);
             //}
+
+            if (ChatSystem.Instance != null)
+            {
+                Destroy(ChatSystem.Instance.gameObject);
+            }
 
             atMm = true;
             var payload = new
             {
                 type = "RemoveClient",
                 reason = "ClientMainMenu",
-                name = nameCache
+                name = nameCache,
+                steamId = steamIdCache
             };
             var json = JsonConvert.SerializeObject(payload);
-            ws.Send(json);
-            nameTagCreated = false;
 
+            if (ws != null && ws.IsAlive)
+            {
+                ws.Send(json);
+            }
+
+            nameTagCreated = false;
         }
 
         public void AddsettingOptions()
@@ -600,14 +887,13 @@ namespace Multi_bloob_adventure_idle
 
             Debug.Log("Settings Ui found!");
 
-            var mainMenu = settingsUi.Find("Main Menu").gameObject;
+            var mainMenu = settingsUi.Find("Main Menu")?.gameObject;
             var button = mainMenu?.GetComponent<Button>();
             if (button != null)
             {
                 button.onClick.AddListener(MainMenuClicked);
                 Debug.Log("Found Main Menu button, added listener for going to main menu.");
             }
-
 
             // Look for "Sound Off" under "Settings Ui"
             Transform soundOff = settingsUi.Find("Sound Off");
@@ -623,9 +909,7 @@ namespace Multi_bloob_adventure_idle
             AddButton(settingsUi, "Enable Level Panel", enableLevelPanel, new Vector2(150, 40));
             //TODO Setup handling of creating/destroying of context menu behaviour on toggle to clean up properly
             AddButton(settingsUi, "Enable Context Menu", enableContextMenu, new Vector2(150, 55));
-
         }
-
 
         private void AddButton(Transform parent, string labelText, ConfigEntry<bool> configEntry, Vector2 position)
         {
@@ -639,7 +923,6 @@ namespace Multi_bloob_adventure_idle
             rt.anchoredPosition = position;
             rt.sizeDelta = Vector2.zero;
 
-            
             Image image = buttonObj.AddComponent<Image>();
             image.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
 
@@ -669,12 +952,12 @@ namespace Multi_bloob_adventure_idle
             labelRT.offsetMax = Vector2.zero;
 
             LayoutElement layoutElement = labelObj.AddComponent<LayoutElement>();
-            layoutElement.preferredWidth = -1; 
+            layoutElement.preferredWidth = -1;
             layoutElement.preferredHeight = -1;
 
             var layoutGroup = buttonObj.AddComponent<HorizontalLayoutGroup>();
             layoutGroup.childAlignment = TextAnchor.MiddleCenter;
-            layoutGroup.padding = new RectOffset(10, 10, 5, 5); 
+            layoutGroup.padding = new RectOffset(10, 10, 5, 5);
             layoutGroup.childForceExpandWidth = false;
             layoutGroup.childForceExpandHeight = false;
 
@@ -686,25 +969,50 @@ namespace Multi_bloob_adventure_idle
                 label.text = labelText + ": " + (configEntry.Value ? "ON" : "OFF");
             });
         }
-
     }
-
 }
-
 
 public class PlayerData
 {
     public string name;
+    public string steamId;
     public bool isDisconnecting;
     public Vector3Like currentPosition;
     public float runSpeed;
     public string hatName;
     public string wingName;
     public ColourLike bloobColour;
+
+    // Stored locally as tuple for convenience. JSON round-tripping is done through SkillTupleDto when needed.
+    [JsonIgnore]
     public Dictionary<string, (int level, int prestige)> skillData;
+
+    [JsonProperty("skillData")]
+    private Dictionary<string, SkillTupleDto> SkillDataSurrogate
+    {
+        get
+        {
+            return skillData?.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new SkillTupleDto { Item1 = kvp.Value.level, Item2 = kvp.Value.prestige });
+        }
+        set
+        {
+            skillData = value?.ToDictionary(
+                kvp => kvp.Key,
+                kvp => (kvp.Value.Item1, kvp.Value.Item2))
+                ?? new Dictionary<string, (int level, int prestige)>();
+        }
+    }
+
     public string[] soulData;
 }
 
+public class SkillTupleDto
+{
+    public int Item1;
+    public int Item2;
+}
 
 public class Vector3Like
 {
@@ -716,7 +1024,6 @@ public class Vector3Like
     public Vector2 ToVector2() => new Vector2(x, y);
 }
 
-
 public class ColourLike
 {
     public float a;
@@ -726,7 +1033,6 @@ public class ColourLike
 
     public Color ToColor() => new Color(r, g, b, a);
 }
-
 
 [HarmonyPatch(typeof(TeleportScript), "OnTriggerEnter2D")]
 public class TeleportScriptTeleportPatch
@@ -742,7 +1048,6 @@ public class TeleportScriptTeleportPatch
         return true;
     }
 }
-
 
 [HarmonyPatch(typeof(CharacterMovement), "Update")]
 public class CharacterMovementUpdatePatch
@@ -760,7 +1065,6 @@ public class CharacterMovementUpdatePatch
         return true;
     }
 }
-
 
 [HarmonyPatch(typeof(CharacterMovement), nameof(CharacterMovement.CloseAllShops))]
 public class CharacterMovementCloseAllShopsPatch
@@ -802,10 +1106,10 @@ public class BloobColourChangeHatPatch
 
 public class IsMultiplayerClone : MonoBehaviour
 {
+    public string steamId;
+    public string displayName;
     //public Vector3 lastTargetPosition = Vector3.positiveInfinity;
 }
-
-
 
 /*public class Billboard : MonoBehaviour
 {

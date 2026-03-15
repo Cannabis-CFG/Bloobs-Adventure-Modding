@@ -130,6 +130,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ChatSystem.cs" />
     <Compile Include="CloneManager.cs" />
     <Compile Include="HoverUIManager.cs" />
     <Compile Include="MultiplayerContextMenu.cs" />
