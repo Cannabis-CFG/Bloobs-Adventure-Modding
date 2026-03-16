@@ -142,7 +142,16 @@ namespace Multi_bloob_adventure_idle
 
         public static ChatSystem Instance { get; private set; }
         public static bool IsChatCapturingInput => Instance != null && Instance._isChatOpen;
-        public static bool ShouldBlockGameInput => Instance != null && Instance._isChatOpen;
+        public static bool ShouldBlockGameInput
+        {
+            get
+            {
+                if (Instance == null)
+                    return false;
+
+                return Instance.IsPointerOverChatWindow();
+            }
+        }
 
         private readonly List<ChatUiMessage> _globalMessages = new();
         private readonly List<ChatUiMessage> _systemMessages = new();
@@ -252,21 +261,7 @@ namespace Multi_bloob_adventure_idle
             if (!MultiplayerPatchPlugin.isReady)
                 return;
 
-            _windowRect = GUI.Window(781245, _windowRect, DrawChatWindow, "Bloobs multiplayer chat");
-
-            // When chat is open, consume mouse input so clicks do not leak through into the game world.
-            if (_isChatOpen && Event.current != null)
-            {
-                switch (Event.current.type)
-                {
-                    case EventType.MouseDown:
-                    case EventType.MouseUp:
-                    case EventType.MouseDrag:
-                    case EventType.ScrollWheel:
-                        Event.current.Use();
-                        break;
-                }
-            }
+            _windowRect = GUI.Window(781245, _windowRect, DrawChatWindow, "Multiplayer Chat");
         }
 
         private void DrawChatWindow(int id)
@@ -1058,9 +1053,10 @@ namespace Multi_bloob_adventure_idle
             if (!_isChatOpen)
                 return false;
 
-            Vector2 mouse = Event.current != null
-                ? Event.current.mousePosition
-                : new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+            Vector2 mouse = new Vector2(
+                Input.mousePosition.x,
+                Screen.height - Input.mousePosition.y
+            );
 
             return _windowRect.Contains(mouse);
         }

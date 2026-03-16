@@ -1,6 +1,7 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
+using Multi_bloob_adventure_idle;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Steamworks;
@@ -62,6 +63,7 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(TeleportScriptTeleportPatch));
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeWingPatch));
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeHatPatch));
+            Harmony.CreateAndPatchAll(typeof(CharacterMovementIsPointerOverUiPatch));
 
             if (ws == null) { Debug.Log("WS NULL"); }
             //Debug.Log("Fully woken up");
@@ -1143,6 +1145,21 @@ public class TeleportScriptTeleportPatch
             return false;
         }
         // Normal Update for local player
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(CharacterMovement), "IsPointerOverUI")]
+public class CharacterMovementIsPointerOverUiPatch
+{
+    static bool Prefix(ref bool __result)
+    {
+        if (ChatSystem.ShouldBlockGameInput)
+        {
+            __result = true;
+            return false;
+        }
+
         return true;
     }
 }
