@@ -6,6 +6,9 @@
 
 ----------
 
+### This readme documentation is currently out of date as of the chat system update. This message will disappear when it is properly updated.
+
+
 ### What It Does
 
 The **Multi-blood Adventure Idle** mod adds basic multiplayer synchronization to the single‑player Bloobs Adventure Idle game. It connects your game client to a central NodeJS server to:
