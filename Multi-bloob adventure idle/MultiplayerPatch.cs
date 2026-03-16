@@ -24,6 +24,9 @@ namespace Multi_bloob_adventure_idle
         private readonly Queue<string> messageQueue = new Queue<string>();
         private readonly object queueLock = new object();
         public static Dictionary<string, (int level, int prestige)> playerSkills = new Dictionary<string, (int level, int prestige)>();
+        private Coroutine skillRefreshCoroutine;
+        private Dictionary<string, (int level, int prestige)> cachedSkillData = new();
+        private bool skillDataDirty;
 
         private WebSocket ws;
         private bool isConnected = false;
@@ -339,6 +342,7 @@ namespace Multi_bloob_adventure_idle
             ChatSystem.Create(Config);
             ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
             //playerLevelCoroutine ??= StartCoroutine(UpdatePlayerLevels());
+            skillRefreshCoroutine ??= StartCoroutine(RefreshSkillDataEnumerator());
             positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
             AddsettingOptions();
 
@@ -389,6 +393,39 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
+        public static string GetPlayerNameFromSteamId(string steamId, string fallback = null)
+        {
+            if (string.IsNullOrWhiteSpace(steamId))
+                return fallback ?? "Unknown Player";
+
+            if (SteamClient.IsValid && SteamClient.SteamId.ToString() == steamId)
+                return SteamClient.Name;
+
+            lock (Players)
+            {
+                if (Players.TryGetValue(steamId, out var pd) && pd != null && !string.IsNullOrWhiteSpace(pd.name))
+                    return pd.name;
+            }
+
+            return fallback ?? steamId;
+        }
+
+        public static string GetSteamIdFromPlayerName(string playerName)
+        {
+            if (string.IsNullOrWhiteSpace(playerName))
+                return null;
+
+            lock (Players)
+            {
+                var pd = Players.Values.FirstOrDefault(p =>
+                    p != null &&
+                    !string.IsNullOrWhiteSpace(p.name) &&
+                    p.name.Equals(playerName, StringComparison.OrdinalIgnoreCase));
+
+                return pd?.steamId;
+            }
+        }
+
         public static List<PlayerData> FindPlayersByPartialName(string partialName)
         {
             if (string.IsNullOrWhiteSpace(partialName))
@@ -408,6 +445,55 @@ namespace Multi_bloob_adventure_idle
                     .ToList();
             }
         }
+
+        private bool AreSkillDictionariesEqual(Dictionary<string, (int level, int prestige)> a, Dictionary<string, (int level, int prestige)> b)
+        {
+            if (ReferenceEquals(a, b))
+                return true;
+
+            if (a == null || b == null)
+                return false;
+
+            if (a.Count != b.Count)
+                return false;
+
+            foreach (var kvp in a)
+            {
+                if (!b.TryGetValue(kvp.Key, out var other))
+                    return false;
+
+                if (kvp.Value.level != other.level || kvp.Value.prestige != other.prestige)
+                    return false;
+            }
+
+            return true;
+        }
+
+
+        IEnumerator RefreshSkillDataEnumerator()
+        {
+            while (true)
+            {
+                if (!isReady)
+                {
+                    Debug.Log("Game not ready, retrying skill refresh in 15 seconds");
+                    yield return new WaitForSecondsRealtime(15f);
+                    continue;
+                }
+
+                var latestSkillData = UpdatePlayerLevels();
+
+                if (!AreSkillDictionariesEqual(cachedSkillData, latestSkillData))
+                {
+                    cachedSkillData = latestSkillData;
+                    skillDataDirty = true;
+                    //Debug.Log("Skill data changed, marking dirty for next payload send.");
+                }
+
+                yield return new WaitForSecondsRealtime(30f);
+            }
+        }
+
 
         private Dictionary<string, (int, int)> UpdatePlayerLevels()
         {
@@ -633,7 +719,18 @@ namespace Multi_bloob_adventure_idle
 
                 foreach (var property in newPayload.Properties())
                 {
-                    if (property.Name == "name" || property.Name == "steamId") continue;
+                    if (property.Name == "name" || property.Name == "steamId")
+                        continue;
+
+                    // Skill data is refreshed on a slower coroutine and only sent when marked dirty.
+                    if (property.Name == "skillData")
+                    {
+                        if (lastPayload == null || skillDataDirty)
+                        {
+                            diffPayload[property.Name] = property.Value;
+                        }
+                        continue;
+                    }
 
                     if (lastPayload == null || !JToken.DeepEquals(property.Value, lastPayload[property.Name]))
                     {
@@ -651,6 +748,7 @@ namespace Multi_bloob_adventure_idle
                         ws.Send(jsonPayload);
                     }
                     lastPayload = newPayload;
+                    skillDataDirty = false;
                 }
 
                 //Debug.Log("Hey shithead");

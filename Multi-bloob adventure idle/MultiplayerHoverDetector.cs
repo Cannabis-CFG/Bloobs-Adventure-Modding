@@ -42,6 +42,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
                 string cloneName = cloneComp.name.Replace("BloobClone_", "");
                 if (MultiplayerPatchPlugin.Players.TryGetValue(cloneName, out var playerData))
                 {
+                    string playerName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(cloneName);
                     string info = BuildHoverInfo(cloneName, playerData);
                     HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);
                     hitOne = true;

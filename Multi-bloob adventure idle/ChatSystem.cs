@@ -142,6 +142,7 @@ namespace Multi_bloob_adventure_idle
 
         public static ChatSystem Instance { get; private set; }
         public static bool IsChatCapturingInput => Instance != null && Instance._isChatOpen;
+        public static bool ShouldBlockGameInput => Instance != null && Instance._isChatOpen;
 
         private readonly List<ChatUiMessage> _globalMessages = new();
         private readonly List<ChatUiMessage> _systemMessages = new();
@@ -238,10 +239,6 @@ namespace Multi_bloob_adventure_idle
                 {
                     CloseChat(clearInput: false);
                 }
-                else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
-                {
-                    SubmitChat();
-                }
             }
 
             if (!string.IsNullOrEmpty(_statusLine) && Time.unscaledTime > _statusUntil)
@@ -255,7 +252,21 @@ namespace Multi_bloob_adventure_idle
             if (!MultiplayerPatchPlugin.isReady)
                 return;
 
-            _windowRect = GUI.Window(781245, _windowRect, DrawChatWindow, "Multiplayer Chat");
+            _windowRect = GUI.Window(781245, _windowRect, DrawChatWindow, "Bloobs multiplayer chat");
+
+            // When chat is open, consume mouse input so clicks do not leak through into the game world.
+            if (_isChatOpen && Event.current != null)
+            {
+                switch (Event.current.type)
+                {
+                    case EventType.MouseDown:
+                    case EventType.MouseUp:
+                    case EventType.MouseDrag:
+                    case EventType.ScrollWheel:
+                        Event.current.Use();
+                        break;
+                }
+            }
         }
 
         private void DrawChatWindow(int id)
@@ -296,6 +307,15 @@ namespace Multi_bloob_adventure_idle
                 {
                     GUI.FocusControl(ChatControlName);
                     _focusInputNextFrame = false;
+                }
+
+                // Allow pressing Enter while focused in the text box to send immediately.
+                if (Event.current != null &&
+                    Event.current.type == EventType.KeyDown &&
+                    (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter))
+                {
+                    SubmitChat();
+                    Event.current.Use();
                 }
 
                 GUILayout.BeginHorizontal();
@@ -927,6 +947,9 @@ namespace Multi_bloob_adventure_idle
 
             _selectedPrivateSteamId = otherSteamId;
             _selectedPrivateName = otherName;
+
+            // Only show a bubble over the actual sender.
+            ShowBubbleForPlayer(fromSteamId, fromName, text);
         }
 
         private void AddSystemLine(string text, ChatMessageKind kind, string timestampUtc = null)
@@ -965,26 +988,83 @@ namespace Multi_bloob_adventure_idle
 
             GameObject target = null;
 
-            if (steamId == SteamClient.SteamId.ToString())
+            // Local player first
+            if (!string.IsNullOrWhiteSpace(steamId) && steamId == SteamClient.SteamId.ToString())
             {
                 target = GameObject.Find("BloobCharacter");
             }
-            else if (!string.IsNullOrWhiteSpace(steamId))
+
+            // Exact clone name by SteamID
+            if (target == null && !string.IsNullOrWhiteSpace(steamId))
             {
                 target = GameObject.Find($"BloobClone_{steamId}");
             }
 
-            if (target == null && !string.IsNullOrWhiteSpace(playerName) && playerName == SteamClient.Name)
+            // Fallback: scan clone markers by SteamID
+            if (target == null && !string.IsNullOrWhiteSpace(steamId))
+            {
+                var cloneMarkers = GameObject.FindObjectsOfType<IsMultiplayerClone>(true);
+                foreach (var marker in cloneMarkers)
+                {
+                    if (marker != null &&
+                        marker.gameObject != null &&
+                        !string.IsNullOrWhiteSpace(marker.steamId) &&
+                        marker.steamId == steamId)
+                    {
+                        target = marker.gameObject;
+                        break;
+                    }
+                }
+            }
+
+            // Final fallback: local player by name
+            if (target == null &&
+                !string.IsNullOrWhiteSpace(playerName) &&
+                SteamClient.IsValid &&
+                playerName == SteamClient.Name)
             {
                 target = GameObject.Find("BloobCharacter");
             }
 
+            // Last-resort fallback: scan clone markers by display name
+            if (target == null && !string.IsNullOrWhiteSpace(playerName))
+            {
+                var cloneMarkers = GameObject.FindObjectsOfType<IsMultiplayerClone>(true);
+                foreach (var marker in cloneMarkers)
+                {
+                    if (marker != null &&
+                        marker.gameObject != null &&
+                        !string.IsNullOrWhiteSpace(marker.displayName) &&
+                        marker.displayName.Equals(playerName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        target = marker.gameObject;
+                        break;
+                    }
+                }
+            }
+
             if (target == null)
+            {
+                //Debug.LogWarning($"Could not find bubble target for {playerName} ({steamId})");
                 return;
+            }
 
             var bubble = ChatBubble.Attach(target);
             bubble.Show(text);
         }
+
+        public bool IsPointerOverChatWindow()
+        {
+            if (!_isChatOpen)
+                return false;
+
+            Vector2 mouse = Event.current != null
+                ? Event.current.mousePosition
+                : new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+
+            return _windowRect.Contains(mouse);
+        }
+
 
         private bool IsBlocked(string steamId)
         {
