@@ -19,7 +19,7 @@ using Image = UnityEngine.UI.Image;
 
 namespace Multi_bloob_adventure_idle
 {
-    [BepInPlugin("com.cannabis.multibloobidle", "Multiblood Adventure Idle", "1.1.0")]
+    [BepInPlugin("com.cannabis.multibloobidle", "Multiblood Adventure Idle", "1.2.0")]
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
         private readonly Queue<string> messageQueue = new Queue<string>();
