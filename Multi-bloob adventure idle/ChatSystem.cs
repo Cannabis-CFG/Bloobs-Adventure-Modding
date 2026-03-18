@@ -36,6 +36,8 @@ namespace Multi_bloob_adventure_idle
         public string FromSteamId;
         public string ToSteamId;
         public string Message;
+        public string ActiveTitle;
+        public string OtherPartyTitle;
         public bool IsIncomingPrivate;
         public bool IsOutgoingPrivate;
 
@@ -141,7 +143,8 @@ namespace Multi_bloob_adventure_idle
         }
 
         public static ChatSystem Instance { get; private set; }
-        public static bool IsChatCapturingInput => Instance != null && Instance._isChatOpen;
+        public static bool IsChatCapturingInput => Instance != null && Instance._isInputActive;
+
         public static bool ShouldBlockGameInput
         {
             get
@@ -153,23 +156,59 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
+        public static bool ShouldBlockKeyboardInput
+        {
+            get
+            {
+                if (Instance == null)
+                    return false;
+
+                return Instance._isInputActive &&
+                       ChatInputOverlay.Instance != null &&
+                       ChatInputOverlay.Instance.HasFocus();
+            }
+        }
+
         private readonly List<ChatUiMessage> _globalMessages = new();
         private readonly List<ChatUiMessage> _systemMessages = new();
         private readonly Dictionary<string, List<ChatUiMessage>> _privateMessagesBySteamId = new();
+        private readonly List<(string id, string label)> _unlockedTitles = new();
+
+        private ChatTab _lastRenderedTab = ChatTab.Global;
+        private string _lastRenderedPrivateSteamId = "";
+        private bool _forceScrollToBottom;
 
         private Rect _windowRect = new Rect(20f, 330f, 760f, 310f);
         private Vector2 _scroll;
         private string _input = "";
         private string _statusLine = "";
         private float _statusUntil;
-        private bool _isChatOpen;
+        private bool _isVisible = true;
+        private bool _isInputActive;
         private bool _focusInputNextFrame;
+        private bool _submitChatRequested;
+        private bool _isPinned;
+        private bool _isResizing;
+        private Vector2 _resizeStartMouse;
+        private Rect _resizeStartRect;
         private ChatTab _activeTab = ChatTab.Global;
+        private int _unreadGlobalCount;
+        private int _unreadSystemCount;
+        private readonly HashSet<string> _unreadPrivateSteamIds = new();
 
         private string _selectedPrivateSteamId = "";
         private string _selectedPrivateName = "";
+        private string _activeTitleId = "";
 
         private ConfigEntry<string> _blockedSteamIdsConfig;
+        private ConfigEntry<string> _preferredTitleIdConfig;
+        private ConfigEntry<float> _windowPosXConfig;
+        private ConfigEntry<float> _windowPosYConfig;
+        private ConfigEntry<float> _windowWidthConfig;
+        private ConfigEntry<float> _windowHeightConfig;
+        private ConfigEntry<bool> _windowPinnedConfig;
+        private ConfigEntry<bool> _windowVisibleConfig;
+
         private HashSet<string> _blockedSteamIds = new();
 
         private List<PlayerResolutionCandidate> _pendingCandidates = new();
@@ -178,6 +217,12 @@ namespace Multi_bloob_adventure_idle
 
         private const int MaxMessagesPerBucket = 250;
         private const string ChatControlName = "MultiBloobGlobalChatInput";
+        private const float MinWindowWidth = 420f;
+        private const float MinWindowHeight = 300f;
+        private const float ResizeGripSize = 18f;
+        private const float HeaderSectionHeight = 74f;
+        private const float ComposerSectionHeight = 82f;
+        private const float FooterSectionHeight = 28f;
 
         public static ChatSystem Create(ConfigFile config)
         {
@@ -189,6 +234,7 @@ namespace Multi_bloob_adventure_idle
             var chat = go.AddComponent<ChatSystem>();
             chat.Initialize(config);
             Instance = chat;
+            ChatInputOverlay.Create();
             return chat;
         }
 
@@ -200,6 +246,38 @@ namespace Multi_bloob_adventure_idle
                 "",
                 "Comma-separated SteamIDs that are blocked locally from chat display."
             );
+
+            _preferredTitleIdConfig = config.Bind(
+                "Chat",
+                "Preferred Title ID",
+                "",
+                "Preferred chat title ID."
+            );
+
+            _windowPosXConfig = config.Bind("Chat Window", "Position X", 20f, "Saved chat window X position.");
+            _windowPosYConfig = config.Bind("Chat Window", "Position Y", 330f, "Saved chat window Y position.");
+            _windowWidthConfig = config.Bind("Chat Window", "Width", 760f, "Saved chat window width.");
+            _windowHeightConfig = config.Bind("Chat Window", "Height", 310f, "Saved chat window height.");
+            _windowPinnedConfig = config.Bind("Chat Window", "Pinned", false, "If true, the chat window cannot be dragged.");
+            _windowVisibleConfig = config.Bind("Chat Window", "Visible", true, "If false, the chat window is hidden.");
+
+            _windowRect = new Rect(
+                _windowPosXConfig.Value,
+                _windowPosYConfig.Value,
+                Mathf.Max(MinWindowWidth, _windowWidthConfig.Value),
+                Mathf.Max(MinWindowHeight, _windowHeightConfig.Value)
+            );
+
+            _isPinned = _windowPinnedConfig.Value;
+            _isVisible = _windowVisibleConfig.Value;
+
+            ChatInputOverlay.Create();
+            ChatInputOverlay.Instance.OnSubmit = submittedText =>
+            {
+                _input = submittedText ?? "";
+                SubmitChat();
+                CloseChat(clearInput: true);
+            };
 
             ReloadBlockedList();
         }
@@ -227,7 +305,7 @@ namespace Multi_bloob_adventure_idle
             if (!MultiplayerPatchPlugin.isReady || !SteamClient.IsValid)
                 return;
 
-            if (!_isChatOpen)
+            if (!_isInputActive)
             {
                 if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
                 {
@@ -258,33 +336,59 @@ namespace Multi_bloob_adventure_idle
 
         private void OnGUI()
         {
-            if (!MultiplayerPatchPlugin.isReady)
+            if (!MultiplayerPatchPlugin.isReady || !_isVisible)
+            {
+                ChatInputOverlay.Instance?.SetVisible(false);
                 return;
+            }
 
-            _windowRect = GUI.Window(781245, _windowRect, DrawChatWindow, "Multiplayer Chat");
+            Rect previousRect = _windowRect;
+            _windowRect = GUI.Window(781245, _windowRect, DrawChatWindow, "Bloobs Online Chat");
+            ClampWindowToScreen();
+
+            if (_windowRect != previousRect)
+                SaveWindowLayout();
+
+            if (_isInputActive)
+            {
+                ChatInputOverlay.Instance?.SetVisible(true);
+                ChatInputOverlay.Instance?.SetScreenRect(_windowRect);
+            }
+            else
+            {
+                ChatInputOverlay.Instance?.SetVisible(false);
+            }
         }
 
         private void DrawChatWindow(int id)
         {
+            Rect pinButtonRect = new Rect(_windowRect.width - 30f, 3f, 24f, 18f);
+            string pinLabel = _isPinned ? "P" : "U";
+            if (GUI.Button(pinButtonRect, pinLabel))
+            {
+                _isPinned = !_isPinned;
+                SaveWindowLayout();
+            }
+
             GUILayout.BeginVertical();
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Toggle(_activeTab == ChatTab.Global, "Global", GUI.skin.button, GUILayout.Width(100)))
-                _activeTab = ChatTab.Global;
-
-            if (GUILayout.Toggle(_activeTab == ChatTab.Private, "Private", GUI.skin.button, GUILayout.Width(100)))
-                _activeTab = ChatTab.Private;
-
-            if (GUILayout.Toggle(_activeTab == ChatTab.System, "System", GUI.skin.button, GUILayout.Width(100)))
-                _activeTab = ChatTab.System;
-            GUILayout.EndHorizontal();
+            DrawTopSection();
 
             if (_activeTab == ChatTab.Private)
             {
                 DrawPrivateTabHeader();
             }
 
-            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(_isChatOpen ? 190f : 230f));
+            float privateHeaderHeight = _activeTab == ChatTab.Private ? 34f : 0f;
+            float statusHeight = string.IsNullOrEmpty(_statusLine) ? 0f : FooterSectionHeight;
+            float bottomSectionHeight = _isInputActive ? ComposerSectionHeight : 52f;
+
+            float messageAreaHeight = Mathf.Max(
+                70f,
+                _windowRect.height - HeaderSectionHeight - privateHeaderHeight - bottomSectionHeight - statusHeight - 18f
+            );
+
+            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(messageAreaHeight));
 
             foreach (var line in GetCurrentTabMessages())
             {
@@ -293,29 +397,158 @@ namespace Multi_bloob_adventure_idle
 
             GUILayout.EndScrollView();
 
-            if (_isChatOpen)
+            string currentPrivateKey = _activeTab == ChatTab.Private ? _selectedPrivateSteamId ?? "" : "";
+
+            if (_lastRenderedTab != _activeTab || _lastRenderedPrivateSteamId != currentPrivateKey)
             {
-                GUI.SetNextControlName(ChatControlName);
-                _input = GUILayout.TextField(_input, GUILayout.Height(28f));
+                _lastRenderedTab = _activeTab;
+                _lastRenderedPrivateSteamId = currentPrivateKey;
+                _forceScrollToBottom = true;
+            }
 
-                if (_focusInputNextFrame)
-                {
-                    GUI.FocusControl(ChatControlName);
-                    _focusInputNextFrame = false;
-                }
+            if (_forceScrollToBottom)
+            {
+                _scroll.y = float.MaxValue;
+                _forceScrollToBottom = false;
+            }
 
-                // Allow pressing Enter while focused in the text box to send immediately.
-                if (Event.current != null &&
-                    Event.current.type == EventType.KeyDown &&
-                    (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter))
-                {
-                    SubmitChat();
-                    Event.current.Use();
-                }
+            DrawBottomSection();
+
+            //if (!string.IsNullOrEmpty(_statusLine))
+            //{
+            //    GUILayout.Space(2f);
+            //    GUILayout.Label(_statusLine, GUILayout.Height(FooterSectionHeight - 4f));
+            //}
+
+            GUILayout.EndVertical();
+
+            HandleResizeGripInsideWindow();
+
+            if (!_isPinned)
+            {
+                GUI.DragWindow(new Rect(0, 0, _windowRect.width - 36f, 22));
+            }
+        }
+
+        private void HandleResizeGripInsideWindow()
+        {
+            if (!_isVisible || Event.current == null)
+                return;
+
+            Rect gripRect = new Rect(
+                _windowRect.width - ResizeGripSize - 4f,
+                _windowRect.height - ResizeGripSize - 4f,
+                ResizeGripSize,
+                ResizeGripSize
+            );
+
+            GUI.Box(gripRect, "↘");
+
+            Vector2 mouse = Event.current.mousePosition;
+
+            switch (Event.current.type)
+            {
+                case EventType.MouseDown:
+                    if (gripRect.Contains(mouse))
+                    {
+                        _isResizing = true;
+                        _resizeStartMouse = mouse;
+                        _resizeStartRect = _windowRect;
+                        Event.current.Use();
+                    }
+                    break;
+
+                case EventType.MouseDrag:
+                    if (_isResizing)
+                    {
+                        Vector2 delta = mouse - _resizeStartMouse;
+                        _windowRect.width = Mathf.Max(MinWindowWidth, _resizeStartRect.width + delta.x);
+                        _windowRect.height = Mathf.Max(MinWindowHeight, _resizeStartRect.height + delta.y);
+                        Event.current.Use();
+                    }
+                    break;
+
+                case EventType.MouseUp:
+                    if (_isResizing)
+                    {
+                        _isResizing = false;
+                        SaveWindowLayout();
+                        Event.current.Use();
+                    }
+                    break;
+            }
+        }
+
+        private void DrawTopSection()
+        {
+            GUILayout.BeginVertical(GUILayout.Height(HeaderSectionHeight));
+
+            GUILayout.BeginHorizontal();
+
+            if (GUILayout.Toggle(_activeTab == ChatTab.Global, BuildTabLabel(ChatTab.Global), GUI.skin.button, GUILayout.Width(100)))
+            {
+                if (_activeTab != ChatTab.Global)
+                    ScrollToBottomNextFrame();
+
+                _activeTab = ChatTab.Global;
+                ClearUnreadForActiveTab();
+            }
+
+            if (GUILayout.Toggle(_activeTab == ChatTab.Private, BuildTabLabel(ChatTab.Private), GUI.skin.button, GUILayout.Width(100)))
+            {
+                if (_activeTab != ChatTab.Private)
+                    ScrollToBottomNextFrame();
+
+                _activeTab = ChatTab.Private;
+                ClearUnreadForActiveTab();
+            }
+
+            if (GUILayout.Toggle(_activeTab == ChatTab.System, BuildTabLabel(ChatTab.System), GUI.skin.button, GUILayout.Width(100)))
+            {
+                if (_activeTab != ChatTab.System)
+                    ScrollToBottomNextFrame();
+
+                _activeTab = ChatTab.System;
+                ClearUnreadForActiveTab();
+            }
+
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+
+            string currentTitleLabel = _unlockedTitles.FirstOrDefault(t => t.id == _activeTitleId).label ?? "None";
+            GUILayout.Label($"Title: {currentTitleLabel}", GUILayout.Width(220));
+
+            if (GUILayout.Button("Next Title", GUILayout.Width(100)))
+            {
+                CycleToNextUnlockedTitle();
+            }
+
+            if (GUILayout.Button("Clear Title", GUILayout.Width(100)))
+            {
+                ClearActiveTitle();
+            }
+
+            GUILayout.EndHorizontal();
+
+            GUILayout.EndVertical();
+        }
+
+        private void DrawBottomSection()
+        {
+            GUILayout.BeginVertical(GUILayout.Height(_isInputActive ? ComposerSectionHeight : 52f));
+
+            if (_isInputActive)
+            {
+                _input = ChatInputOverlay.Instance?.GetText() ?? _input;
+
+                GUILayout.Space(28f);
+                GUILayout.Space(6f);
 
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("Send", GUILayout.Width(90), GUILayout.Height(26)))
                 {
+                    _input = ChatInputOverlay.Instance?.GetText() ?? _input;
                     SubmitChat();
                 }
 
@@ -327,22 +560,16 @@ namespace Multi_bloob_adventure_idle
             }
             else
             {
+                GUILayout.Space(8f);
                 GUILayout.Label("Press Enter or / to chat. Press ` to hide/show the window.");
             }
 
-            if (!string.IsNullOrEmpty(_statusLine))
-            {
-                GUILayout.Space(4f);
-                GUILayout.Label(_statusLine);
-            }
-
             GUILayout.EndVertical();
-            GUI.DragWindow(new Rect(0, 0, 9999, 22));
         }
 
         private void DrawPrivateTabHeader()
         {
-            GUILayout.BeginHorizontal();
+            GUILayout.BeginHorizontal(GUILayout.Height(30f));
 
             var privateTargets = _privateMessagesBySteamId
                 .Select(kvp =>
@@ -351,7 +578,8 @@ namespace Multi_bloob_adventure_idle
                     return new
                     {
                         SteamId = kvp.Key,
-                        Name = first?.OtherPartyName ?? "Unknown"
+                        Name = first?.OtherPartyName ?? "Unknown",
+                        HasUnread = _unreadPrivateSteamIds.Contains(kvp.Key)
                     };
                 })
                 .OrderBy(x => x.Name)
@@ -366,13 +594,35 @@ namespace Multi_bloob_adventure_idle
                 foreach (var target in privateTargets)
                 {
                     bool selected = _selectedPrivateSteamId == target.SteamId;
-                    if (GUILayout.Toggle(selected, target.Name, GUI.skin.button, GUILayout.Width(130)))
+                    string privateLabel = target.HasUnread ? $"{target.Name} (*)" : target.Name;
+
+                    if (GUILayout.Toggle(selected, privateLabel, GUI.skin.button, GUILayout.Width(130)))
                     {
+                        if (_selectedPrivateSteamId != target.SteamId)
+                            ScrollToBottomNextFrame();
+
                         _selectedPrivateSteamId = target.SteamId;
                         _selectedPrivateName = target.Name;
+                        _unreadPrivateSteamIds.Remove(target.SteamId);
                     }
                 }
             }
+
+            GUILayout.FlexibleSpace();
+
+            GUI.enabled = !string.IsNullOrWhiteSpace(_selectedPrivateSteamId);
+
+            if (GUILayout.Button("Clear", GUILayout.Width(70)))
+            {
+                ClearSelectedPrivateConversation(removeTabCompletely: false);
+            }
+
+            if (GUILayout.Button("Close Tab", GUILayout.Width(90)))
+            {
+                ClearSelectedPrivateConversation(removeTabCompletely: true);
+            }
+
+            GUI.enabled = true;
 
             GUILayout.EndHorizontal();
         }
@@ -403,43 +653,155 @@ namespace Multi_bloob_adventure_idle
         {
             string prefix = $"[{msg.LocalTimeString}] ";
 
+            string displayNameWithTitle = FormatNameWithTitle(msg.ActiveTitle, MultiplayerPatchPlugin.GetPlayerNameFromSteamId(msg.FromSteamId, msg.DisplayName));
+            string otherPartyWithTitle = FormatNameWithTitle(msg.OtherPartyTitle, MultiplayerPatchPlugin.GetPlayerNameFromSteamId(msg.ToSteamId, msg.OtherPartyName));
+
             return msg.Kind switch
             {
-                ChatMessageKind.Global => $"{prefix}{msg.DisplayName}: {msg.Message}",
-                ChatMessageKind.Private when msg.IsOutgoingPrivate => $"{prefix}[To {msg.OtherPartyName}] {msg.Message}",
-                ChatMessageKind.Private when msg.IsIncomingPrivate => $"{prefix}[From {msg.DisplayName}] {msg.Message}",
+                ChatMessageKind.Global => $"{prefix}{displayNameWithTitle}: {msg.Message}",
+                ChatMessageKind.Private when msg.IsOutgoingPrivate => $"{prefix}[To {otherPartyWithTitle}] {msg.Message}",
+                ChatMessageKind.Private when msg.IsIncomingPrivate => $"{prefix}[From {displayNameWithTitle}] {msg.Message}",
                 ChatMessageKind.SystemRegular => $"{prefix}[SERVER] {msg.Message}",
                 ChatMessageKind.SystemImportant => $"{prefix}[IMPORTANT] {msg.Message}",
                 ChatMessageKind.SystemCritical => $"{prefix}[CRITICAL] {msg.Message}",
                 ChatMessageKind.Error => $"{prefix}[ERROR] {msg.Message}",
-                _ => $"{prefix}{msg.DisplayName}: {msg.Message}"
+                _ => $"{prefix}{displayNameWithTitle}: {msg.Message}"
             };
+        }
+
+        private string FormatNameWithTitle(string title, string name)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return name;
+
+            return $"[{title}] {name}";
+        }
+
+        private void CycleToNextUnlockedTitle()
+        {
+            if (_unlockedTitles.Count == 0)
+            {
+                AddSystemLine("You do not currently have any unlocked chat titles.", ChatMessageKind.Error);
+                return;
+            }
+
+            int currentIndex = _unlockedTitles.FindIndex(t => t.id == _activeTitleId);
+            int nextIndex = currentIndex + 1;
+
+            if (currentIndex < 0 || nextIndex >= _unlockedTitles.Count)
+                nextIndex = 0;
+
+            string nextTitleId = _unlockedTitles[nextIndex].id;
+            _preferredTitleIdConfig.Value = nextTitleId;
+            MultiplayerPatchPlugin.instance?.SendSetTitlePacket(nextTitleId);
+        }
+
+        private void ClearActiveTitle()
+        {
+            _preferredTitleIdConfig.Value = "";
+            MultiplayerPatchPlugin.instance?.SendSetTitlePacket("");
+        }
+
+        private void ScrollToBottomNextFrame()
+        {
+            _forceScrollToBottom = true;
+        }
+
+        private void ClearSelectedPrivateConversation(bool removeTabCompletely)
+        {
+            if (string.IsNullOrWhiteSpace(_selectedPrivateSteamId))
+            {
+                AddSystemLine("No private conversation is selected.", ChatMessageKind.Error);
+                return;
+            }
+
+            if (_privateMessagesBySteamId.TryGetValue(_selectedPrivateSteamId, out var bucket))
+            {
+                if (removeTabCompletely)
+                {
+                    _privateMessagesBySteamId.Remove(_selectedPrivateSteamId);
+
+                    var next = _privateMessagesBySteamId.Keys.OrderBy(x => x).FirstOrDefault();
+                    _selectedPrivateSteamId = next ?? "";
+                    _selectedPrivateName = string.IsNullOrWhiteSpace(next)
+                        ? ""
+                        : MultiplayerPatchPlugin.GetPlayerNameFromSteamId(next, "Unknown");
+                }
+                else
+                {
+                    bucket.Clear();
+                }
+
+                ScrollToBottomNextFrame();
+            }
+        }
+
+        private void ClearPrivateConversationBySteamId(string steamId, bool removeTabCompletely)
+        {
+            if (string.IsNullOrWhiteSpace(steamId))
+                return;
+
+            if (_privateMessagesBySteamId.ContainsKey(steamId))
+            {
+                if (removeTabCompletely)
+                    _privateMessagesBySteamId.Remove(steamId);
+                else
+                    _privateMessagesBySteamId[steamId].Clear();
+            }
+
+            if (_selectedPrivateSteamId == steamId)
+            {
+                if (removeTabCompletely)
+                {
+                    var next = _privateMessagesBySteamId.Keys.OrderBy(x => x).FirstOrDefault();
+                    _selectedPrivateSteamId = next ?? "";
+                    _selectedPrivateName = string.IsNullOrWhiteSpace(next)
+                        ? ""
+                        : MultiplayerPatchPlugin.GetPlayerNameFromSteamId(next, "Unknown");
+                }
+
+                ScrollToBottomNextFrame();
+            }
         }
 
         public void OpenChat(bool seedSlash)
         {
-            _isChatOpen = true;
-            _focusInputNextFrame = true;
+            _isVisible = true;
+            _isInputActive = true;
+            _submitChatRequested = false;
+            SaveWindowLayout();
 
             if (seedSlash && string.IsNullOrWhiteSpace(_input))
-            {
                 _input = "/";
-            }
+
+            ChatInputOverlay.Instance?.SetVisible(true);
+            ChatInputOverlay.Instance?.SetText(_input);
+            ChatInputOverlay.Instance?.Focus();
         }
 
         public void CloseChat(bool clearInput)
         {
-            _isChatOpen = false;
+            _isInputActive = false;
+            _submitChatRequested = false;
 
             if (clearInput)
                 _input = "";
 
+            ChatInputOverlay.Instance?.SetVisible(false);
+            ChatInputOverlay.Instance?.Unfocus();
             GUI.FocusControl(null);
         }
 
         public void ToggleVisibilityOnly()
         {
-            _windowRect.x = (_windowRect.x < -700f) ? 20f : -900f;
+            _isVisible = !_isVisible;
+            if (!_isVisible)
+            {
+                _isInputActive = false;
+                _submitChatRequested = false;
+                GUI.FocusControl(null);
+            }
+            SaveWindowLayout();
         }
 
         public void SubmitChat()
@@ -464,12 +826,81 @@ namespace Multi_bloob_adventure_idle
             CloseChat(clearInput: true);
         }
 
+        private void SaveWindowLayout()
+        {
+            _windowPosXConfig.Value = _windowRect.x;
+            _windowPosYConfig.Value = _windowRect.y;
+            _windowWidthConfig.Value = _windowRect.width;
+            _windowHeightConfig.Value = _windowRect.height;
+            _windowPinnedConfig.Value = _isPinned;
+            _windowVisibleConfig.Value = _isVisible;
+        }
+
+        private void ClampWindowToScreen()
+        {
+            _windowRect.width = Mathf.Max(MinWindowWidth, _windowRect.width);
+            _windowRect.height = Mathf.Max(MinWindowHeight, _windowRect.height);
+
+            float maxX = Mathf.Max(0f, Screen.width - _windowRect.width);
+            float maxY = Mathf.Max(0f, Screen.height - _windowRect.height);
+
+            _windowRect.x = Mathf.Clamp(_windowRect.x, 0f, maxX);
+            _windowRect.y = Mathf.Clamp(_windowRect.y, 0f, maxY);
+        }
+
+        public void ReceiveTitleState(JObject msg)
+        {
+            _unlockedTitles.Clear();
+
+            var unlocked = msg["unlockedTitles"] as JArray;
+            if (unlocked != null)
+            {
+                foreach (var token in unlocked)
+                {
+                    if (token is JObject obj)
+                    {
+                        string id = obj["id"]?.ToString();
+                        string label = obj["label"]?.ToString();
+
+                        if (!string.IsNullOrWhiteSpace(id))
+                            _unlockedTitles.Add((id, string.IsNullOrWhiteSpace(label) ? id : label));
+                    }
+                    else if (token is JValue valueToken)
+                    {
+                        string raw = valueToken.ToString();
+                        if (!string.IsNullOrWhiteSpace(raw))
+                            _unlockedTitles.Add((raw, raw));
+                    }
+                }
+            }
+
+            _activeTitleId = "";
+
+            var activeTitleToken = msg["activeTitle"];
+            if (activeTitleToken is JObject activeObj)
+            {
+                _activeTitleId = activeObj["id"]?.ToString() ?? "";
+            }
+            else if (activeTitleToken is JValue activeValue)
+            {
+                _activeTitleId = activeValue.ToString() ?? "";
+            }
+
+            string preferred = _preferredTitleIdConfig.Value ?? "";
+            if (!string.IsNullOrWhiteSpace(preferred) &&
+                _unlockedTitles.Any(t => t.id == preferred) &&
+                preferred != _activeTitleId)
+            {
+                MultiplayerPatchPlugin.instance?.SendSetTitlePacket(preferred);
+            }
+        }
+
         private bool TryHandleLocalOnlyCommand(string raw)
         {
             if (!raw.StartsWith("/"))
                 return false;
 
-            string[] split = raw.Split(' ', (char)StringSplitOptions.RemoveEmptyEntries);
+            string[] split = raw.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (split.Length == 0)
                 return false;
 
@@ -485,24 +916,17 @@ namespace Multi_bloob_adventure_idle
                     AddSystemLine("/unblock <steamId> - Unblock a player locally by SteamID", ChatMessageKind.SystemRegular);
                     AddSystemLine("/block <partialName|steamId> - Block by partial username or SteamID", ChatMessageKind.SystemRegular);
                     AddSystemLine("/blockselect <number> - Finish a pending /block selection", ChatMessageKind.SystemRegular);
-                    AddSystemLine("/unblockname <partialName|steamId> - Unblock by partial username or SteamID", ChatMessageKind.SystemRegular);
-                    return true;
-
-                case "/unblock":
-                    if (split.Length < 2)
-                    {
-                        AddSystemLine("Usage: /unblock <steamId>", ChatMessageKind.Error);
-                        return true;
-                    }
-
-                    UnblockSteamId(split[1]);
-                    AddSystemLine($"Unblocked SteamID {split[1]} locally.", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/unblock <partialName|steamId> - Unblock by partial username or SteamID", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/pmclear - Clear the selected private conversation", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/pmclose - Close the selected private conversation tab", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/title - Cycle to the next unlocked title", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/cleartitle - Clear your active title", ChatMessageKind.SystemRegular);
                     return true;
 
                 case "/block":
                     if (split.Length < 2)
                     {
-                        AddSystemLine("Usage: /blockname <playerName|steamId>", ChatMessageKind.Error);
+                        AddSystemLine("Usage: /block <playerName|steamId>", ChatMessageKind.Error);
                         return true;
                     }
 
@@ -519,10 +943,10 @@ namespace Multi_bloob_adventure_idle
                     CompletePendingSelection(PendingSelectionMode.Block, selectedIndex);
                     return true;
 
-                case "/unblockname":
+                case "/unblock":
                     if (split.Length < 2)
                     {
-                        AddSystemLine("Usage: /unblockname <playerName|steamId>", ChatMessageKind.Error);
+                        AddSystemLine("Usage: /unblock <playerName|steamId>", ChatMessageKind.Error);
                         return true;
                     }
 
@@ -548,6 +972,24 @@ namespace Multi_bloob_adventure_idle
                     }
 
                     CompletePendingSelection(PendingSelectionMode.Whisper, whisperSelection);
+                    return true;
+
+                case "/pmclear":
+                    ClearSelectedPrivateConversation(removeTabCompletely: false);
+                    AddSystemLine("Cleared selected private conversation.", ChatMessageKind.SystemRegular);
+                    return true;
+
+                case "/pmclose":
+                    ClearSelectedPrivateConversation(removeTabCompletely: true);
+                    AddSystemLine("Closed selected private conversation tab.", ChatMessageKind.SystemRegular);
+                    return true;
+
+                case "/title":
+                    CycleToNextUnlockedTitle();
+                    return true;
+
+                case "/cleartitle":
+                    ClearActiveTitle();
                     return true;
             }
 
@@ -626,7 +1068,7 @@ namespace Multi_bloob_adventure_idle
             {
                 var target = matches[0];
                 MultiplayerPatchPlugin.instance?.SendChatPacket($"/w {target.steamId} {message}");
-                AddSystemLine($"Resolved whisper target to {target.name} ({target.steamId}).", ChatMessageKind.SystemRegular);
+                //AddSystemLine($"Resolved whisper target to {target.name} ({target.steamId}).", ChatMessageKind.SystemRegular);
                 return;
             }
 
@@ -695,7 +1137,7 @@ namespace Multi_bloob_adventure_idle
 
                 case PendingSelectionMode.Whisper:
                     MultiplayerPatchPlugin.instance?.SendChatPacket($"/w {chosen.SteamId} {_pendingWhisperMessage}");
-                    AddSystemLine($"Resolved whisper target to {chosen.Name} ({chosen.SteamId}).", ChatMessageKind.SystemRegular);
+                    //AddSystemLine($"Resolved whisper target to {chosen.Name} ({chosen.SteamId}).", ChatMessageKind.SystemRegular);
                     break;
             }
 
@@ -714,7 +1156,6 @@ namespace Multi_bloob_adventure_idle
 
             lock (MultiplayerPatchPlugin.Players)
             {
-                // SteamID direct fallback first
                 if (LooksLikeSteamId(trimmed))
                 {
                     if (MultiplayerPatchPlugin.Players.TryGetValue(trimmed, out var bySteamId) && bySteamId != null)
@@ -722,19 +1163,12 @@ namespace Multi_bloob_adventure_idle
                         if (!onlyBlocked || IsBlocked(bySteamId.steamId))
                             results.Add(bySteamId);
 
-                        return results
-                            .GroupBy(p => p.steamId)
-                            .Select(g => g.First())
-                            .ToList();
+                        return results.GroupBy(p => p.steamId).Select(g => g.First()).ToList();
                     }
                 }
 
-                // Exact name first
                 var exactMatches = MultiplayerPatchPlugin.Players.Values
-                    .Where(p =>
-                        p != null &&
-                        !string.IsNullOrWhiteSpace(p.name) &&
-                        p.name.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
+                    .Where(p => p != null && !string.IsNullOrWhiteSpace(p.name) && p.name.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
                     .Where(p => !onlyBlocked || IsBlocked(p.steamId))
                     .GroupBy(p => p.steamId)
                     .Select(g => g.First())
@@ -743,20 +1177,14 @@ namespace Multi_bloob_adventure_idle
                 if (exactMatches.Count > 0)
                     return exactMatches;
 
-                // Then partial name match
-                var partialMatches = MultiplayerPatchPlugin.Players.Values
-                    .Where(p =>
-                        p != null &&
-                        !string.IsNullOrWhiteSpace(p.name) &&
-                        p.name.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0)
+                return MultiplayerPatchPlugin.Players.Values
+                    .Where(p => p != null && !string.IsNullOrWhiteSpace(p.name) && p.name.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0)
                     .Where(p => !onlyBlocked || IsBlocked(p.steamId))
                     .GroupBy(p => p.steamId)
                     .Select(g => g.First())
                     .OrderBy(p => p.name.Length)
                     .ThenBy(p => p.name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
-
-                return partialMatches;
             }
         }
 
@@ -817,6 +1245,7 @@ namespace Multi_bloob_adventure_idle
                     ReceiveGlobalMessage(
                         token["name"]?.ToString(),
                         token["steamId"]?.ToString(),
+                        token["activeTitle"]?.ToString(),
                         token["message"]?.ToString(),
                         token["timestampUtc"]?.ToString(),
                         false
@@ -834,6 +1263,7 @@ namespace Multi_bloob_adventure_idle
                 ReceiveGlobalMessage(
                     msg["name"]?.ToString(),
                     msg["steamId"]?.ToString(),
+                    msg["activeTitle"]?.ToString(),
                     msg["message"]?.ToString(),
                     msg["timestampUtc"]?.ToString(),
                     true
@@ -844,12 +1274,68 @@ namespace Multi_bloob_adventure_idle
                 ReceivePrivateMessage(
                     msg["fromName"]?.ToString(),
                     msg["fromSteamId"]?.ToString(),
+                    msg["fromActiveTitle"]?.ToString(),
                     msg["toName"]?.ToString(),
                     msg["toSteamId"]?.ToString(),
+                    msg["toActiveTitle"]?.ToString(),
                     msg["message"]?.ToString(),
                     msg["timestampUtc"]?.ToString()
                 );
             }
+        }
+
+        private void MarkUnreadForIncomingMessage(ChatTab tab, string privateSteamId = null)
+        {
+            switch (tab)
+            {
+                case ChatTab.Global:
+                    if (_activeTab != ChatTab.Global)
+                        _unreadGlobalCount++;
+                    break;
+
+                case ChatTab.System:
+                    if (_activeTab != ChatTab.System)
+                        _unreadSystemCount++;
+                    break;
+
+                case ChatTab.Private:
+                    if (string.IsNullOrWhiteSpace(privateSteamId))
+                        return;
+
+                    if (!(_activeTab == ChatTab.Private && _selectedPrivateSteamId == privateSteamId))
+                        _unreadPrivateSteamIds.Add(privateSteamId);
+                    break;
+            }
+        }
+
+        private void ClearUnreadForActiveTab()
+        {
+            switch (_activeTab)
+            {
+                case ChatTab.Global:
+                    _unreadGlobalCount = 0;
+                    break;
+
+                case ChatTab.System:
+                    _unreadSystemCount = 0;
+                    break;
+
+                case ChatTab.Private:
+                    if (!string.IsNullOrWhiteSpace(_selectedPrivateSteamId))
+                        _unreadPrivateSteamIds.Remove(_selectedPrivateSteamId);
+                    break;
+            }
+        }
+
+        private string BuildTabLabel(ChatTab tab)
+        {
+            return tab switch
+            {
+                ChatTab.Global => _unreadGlobalCount > 0 ? $"Global ({_unreadGlobalCount})" : "Global",
+                ChatTab.System => _unreadSystemCount > 0 ? $"System ({_unreadSystemCount})" : "System",
+                ChatTab.Private => _unreadPrivateSteamIds.Count > 0 ? $"Private ({_unreadPrivateSteamIds.Count})" : "Private",
+                _ => tab.ToString()
+            };
         }
 
         public void ReceiveBroadcast(JObject msg)
@@ -873,7 +1359,7 @@ namespace Multi_bloob_adventure_idle
             AddSystemLine(error, ChatMessageKind.Error);
         }
 
-        private void ReceiveGlobalMessage(string fromName, string fromSteamId, string text, string timestampUtc, bool showBubble)
+        private void ReceiveGlobalMessage(string fromName, string fromSteamId, string activeTitle, string text, string timestampUtc, bool showBubble)
         {
             if (IsBlocked(fromSteamId))
                 return;
@@ -884,10 +1370,16 @@ namespace Multi_bloob_adventure_idle
                 TimestampUtc = timestampUtc,
                 DisplayName = fromName,
                 FromSteamId = fromSteamId,
-                Message = text
+                Message = text,
+                ActiveTitle = activeTitle
             };
 
             AddMessage(_globalMessages, msg);
+
+            bool isFromLocalPlayer = !string.IsNullOrWhiteSpace(fromSteamId) && SteamClient.IsValid && fromSteamId == SteamClient.SteamId.ToString();
+
+            if (!isFromLocalPlayer)
+                MarkUnreadForIncomingMessage(ChatTab.Global);
 
             if (showBubble)
             {
@@ -895,24 +1387,27 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
-        private void ReceivePrivateMessage(string fromName, string fromSteamId, string toName, string toSteamId, string text, string timestampUtc)
+        private void ReceivePrivateMessage(string fromName, string fromSteamId, string fromActiveTitle, string toName, string toSteamId, string toActiveTitle, string text, string timestampUtc)
         {
             string mySteamId = SteamClient.SteamId.ToString();
 
             string otherSteamId;
             string otherName;
+            string otherTitle;
             bool incoming;
 
             if (fromSteamId == mySteamId)
             {
                 otherSteamId = toSteamId;
                 otherName = toName;
+                otherTitle = toActiveTitle;
                 incoming = false;
             }
             else
             {
                 otherSteamId = fromSteamId;
                 otherName = fromName;
+                otherTitle = fromActiveTitle;
                 incoming = true;
             }
 
@@ -934,16 +1429,22 @@ namespace Multi_bloob_adventure_idle
                 FromSteamId = fromSteamId,
                 ToSteamId = toSteamId,
                 Message = text,
+                ActiveTitle = fromActiveTitle,
+                OtherPartyTitle = otherTitle,
                 IsIncomingPrivate = incoming,
                 IsOutgoingPrivate = !incoming
             };
 
             AddMessage(bucket, msg);
 
+            if (incoming)
+                MarkUnreadForIncomingMessage(ChatTab.Private, otherSteamId);
+
             _selectedPrivateSteamId = otherSteamId;
             _selectedPrivateName = otherName;
-
-            // Only show a bubble over the actual sender.
+            if (_activeTab == ChatTab.Private && _selectedPrivateSteamId == otherSteamId)
+                _unreadPrivateSteamIds.Remove(otherSteamId);
+            ScrollToBottomNextFrame();
             ShowBubbleForPlayer(fromSteamId, fromName, text);
         }
 
@@ -958,6 +1459,7 @@ namespace Multi_bloob_adventure_idle
             };
 
             AddMessage(_systemMessages, msg);
+            MarkUnreadForIncomingMessage(ChatTab.System);
             SetStatus(text);
         }
 
@@ -967,7 +1469,7 @@ namespace Multi_bloob_adventure_idle
             while (list.Count > MaxMessagesPerBucket)
                 list.RemoveAt(0);
 
-            _scroll.y = float.MaxValue;
+            _forceScrollToBottom = true;
         }
 
         private void SetStatus(string text, float duration = 3f)
@@ -983,28 +1485,18 @@ namespace Multi_bloob_adventure_idle
 
             GameObject target = null;
 
-            // Local player first
             if (!string.IsNullOrWhiteSpace(steamId) && steamId == SteamClient.SteamId.ToString())
-            {
                 target = GameObject.Find("BloobCharacter");
-            }
 
-            // Exact clone name by SteamID
             if (target == null && !string.IsNullOrWhiteSpace(steamId))
-            {
                 target = GameObject.Find($"BloobClone_{steamId}");
-            }
 
-            // Fallback: scan clone markers by SteamID
             if (target == null && !string.IsNullOrWhiteSpace(steamId))
             {
                 var cloneMarkers = GameObject.FindObjectsOfType<IsMultiplayerClone>(true);
                 foreach (var marker in cloneMarkers)
                 {
-                    if (marker != null &&
-                        marker.gameObject != null &&
-                        !string.IsNullOrWhiteSpace(marker.steamId) &&
-                        marker.steamId == steamId)
+                    if (marker != null && marker.gameObject != null && !string.IsNullOrWhiteSpace(marker.steamId) && marker.steamId == steamId)
                     {
                         target = marker.gameObject;
                         break;
@@ -1012,25 +1504,15 @@ namespace Multi_bloob_adventure_idle
                 }
             }
 
-            // Final fallback: local player by name
-            if (target == null &&
-                !string.IsNullOrWhiteSpace(playerName) &&
-                SteamClient.IsValid &&
-                playerName == SteamClient.Name)
-            {
+            if (target == null && !string.IsNullOrWhiteSpace(playerName) && SteamClient.IsValid && playerName == SteamClient.Name)
                 target = GameObject.Find("BloobCharacter");
-            }
 
-            // Last-resort fallback: scan clone markers by display name
             if (target == null && !string.IsNullOrWhiteSpace(playerName))
             {
                 var cloneMarkers = GameObject.FindObjectsOfType<IsMultiplayerClone>(true);
                 foreach (var marker in cloneMarkers)
                 {
-                    if (marker != null &&
-                        marker.gameObject != null &&
-                        !string.IsNullOrWhiteSpace(marker.displayName) &&
-                        marker.displayName.Equals(playerName, StringComparison.OrdinalIgnoreCase))
+                    if (marker != null && marker.gameObject != null && !string.IsNullOrWhiteSpace(marker.displayName) && marker.displayName.Equals(playerName, StringComparison.OrdinalIgnoreCase))
                     {
                         target = marker.gameObject;
                         break;
@@ -1039,10 +1521,7 @@ namespace Multi_bloob_adventure_idle
             }
 
             if (target == null)
-            {
-                //Debug.LogWarning($"Could not find bubble target for {playerName} ({steamId})");
                 return;
-            }
 
             var bubble = ChatBubble.Attach(target);
             bubble.Show(text);
@@ -1050,17 +1529,12 @@ namespace Multi_bloob_adventure_idle
 
         public bool IsPointerOverChatWindow()
         {
-            if (!_isChatOpen)
+            if (!_isVisible)
                 return false;
 
-            Vector2 mouse = new Vector2(
-                Input.mousePosition.x,
-                Screen.height - Input.mousePosition.y
-            );
-
+            Vector2 mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
             return _windowRect.Contains(mouse);
         }
-
 
         private bool IsBlocked(string steamId)
         {
@@ -1088,10 +1562,7 @@ namespace Multi_bloob_adventure_idle
         private void ReloadBlockedList()
         {
             _blockedSteamIds = new HashSet<string>(
-                (_blockedSteamIdsConfig.Value ?? "")
-                    .Split(',')
-                    .Select(x => x.Trim())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                (_blockedSteamIdsConfig.Value ?? "").Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x))
             );
         }
 

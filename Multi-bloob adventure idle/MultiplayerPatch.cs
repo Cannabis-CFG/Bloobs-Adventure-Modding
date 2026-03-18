@@ -64,6 +64,12 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeWingPatch));
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeHatPatch));
             Harmony.CreateAndPatchAll(typeof(CharacterMovementIsPointerOverUiPatch));
+            Harmony.CreateAndPatchAll(typeof(MapToggleLateUpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(OfflineProgressionLateUpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(MenuBarLateUpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(CameraMovementLateUpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(PrestigeManagerLateUpdatePatch));
+            Harmony.CreateAndPatchAll(typeof(BuildingManagerLateUpdatePatch));
 
             if (ws == null) { Debug.Log("WS NULL"); }
             //Debug.Log("Fully woken up");
@@ -313,6 +319,11 @@ namespace Multi_bloob_adventure_idle
                                     ChatSystem.Instance?.ReceiveError(msg["error"]?.ToString() ?? "Unknown chat error.");
                                 }
                                 break;
+                            case "titleState":
+                                {
+                                    ChatSystem.Instance?.ReceiveTitleState(msg);
+                                }
+                                break;
                         }
                     }
                 }
@@ -524,6 +535,8 @@ namespace Multi_bloob_adventure_idle
                 // Skill Class Name edge cases
                 if (childName == "SoulBinding")
                     skillClassName = "SoulBinding";
+                if (childName == "Homesteading")
+                    skillClassName = "HomeSteadingSkill";
 
                 // Try to get the component dynamically
                 Component skillComponent = child.GetComponent(skillClassName);
@@ -887,6 +900,21 @@ namespace Multi_bloob_adventure_idle
             ws.Send(json);
         }
 
+        public void SendSetTitlePacket(string titleId)
+        {
+            if (ws == null || !isConnected || !ws.IsAlive || !SteamClient.IsValid)
+                return;
+
+            var payload = new
+            {
+                type = "setTitle",
+                steamId = SteamClient.SteamId.ToString(),
+                titleId = titleId ?? ""
+            };
+
+            ws.Send(JsonConvert.SerializeObject(payload));
+        }
+
         private void HandleConfiguration()
         {
             enableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
@@ -1133,6 +1161,80 @@ public class ColourLike
 
     public Color ToColor() => new Color(r, g, b, a);
 }
+
+
+[HarmonyPatch(typeof(OfflineProgression), "LateUpdate")]
+public class OfflineProgressionLateUpdatePatch
+{
+    static bool Prefix()
+    {
+        if (ChatSystem.ShouldBlockKeyboardInput)
+            return false;
+
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(MenuBar), "LateUpdate")]
+public class MenuBarLateUpdatePatch
+{
+    static bool Prefix()
+    {
+        if (ChatSystem.ShouldBlockKeyboardInput)
+            return false;
+
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(CameraMovement), "LateUpdate")]
+public class CameraMovementLateUpdatePatch
+{
+    static bool Prefix()
+    {
+        if (ChatSystem.ShouldBlockKeyboardInput)
+            return false;
+
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(MapToggle), "LateUpdate")]
+public class MapToggleLateUpdatePatch
+{
+    static bool Prefix()
+    {
+        if (ChatSystem.ShouldBlockKeyboardInput)
+            return false;
+
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(PrestigeManager), "LateUpdate")]
+public class PrestigeManagerLateUpdatePatch
+{
+    static bool Prefix()
+    {
+        if (ChatSystem.ShouldBlockKeyboardInput)
+            return false;
+
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(BuildingManager), "LateUpdate")]
+public class BuildingManagerLateUpdatePatch
+{
+    static bool Prefix()
+    {
+        if (ChatSystem.ShouldBlockKeyboardInput)
+            return false;
+
+        return true;
+    }
+}
+
 
 [HarmonyPatch(typeof(TeleportScript), "OnTriggerEnter2D")]
 public class TeleportScriptTeleportPatch

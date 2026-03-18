@@ -43,7 +43,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
                 if (MultiplayerPatchPlugin.Players.TryGetValue(cloneName, out var playerData))
                 {
                     string playerName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(cloneName);
-                    string info = BuildHoverInfo(cloneName, playerData);
+                    string info = BuildHoverInfo(playerName, playerData);
                     HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);
                     hitOne = true;
                 }
