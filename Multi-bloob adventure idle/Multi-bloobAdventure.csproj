@@ -135,8 +135,11 @@
     <Compile Include="CloneManager.cs" />
     <Compile Include="HoverUIManager.cs" />
     <Compile Include="MultiplayerContextMenu.cs" />
+    <Compile Include="MultiplayerData.cs" />
     <Compile Include="MultiplayerHoverDetector.cs" />
+    <Compile Include="MultiplayerModels.cs" />
     <Compile Include="MultiplayerPatch.cs" />
+    <Compile Include="Patches.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
