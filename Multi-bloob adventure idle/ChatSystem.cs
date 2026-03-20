@@ -305,11 +305,11 @@ namespace Multi_bloob_adventure_idle
 
             if (!_isInputActive)
             {
-                if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+                if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) && _isVisible)
                 {
                     OpenChat(seedSlash: false);
                 }
-                else if (Input.GetKeyDown(KeyCode.Slash))
+                else if (Input.GetKeyDown(KeyCode.Slash) && _isVisible)
                 {
                     OpenChat(seedSlash: true);
                 }
