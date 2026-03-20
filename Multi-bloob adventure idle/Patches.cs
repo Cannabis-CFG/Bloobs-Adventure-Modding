@@ -149,9 +149,12 @@ namespace Multi_bloob_adventure_idle
     public class BloobColourChangeWingPatch
     {
         [HarmonyPostfix]
-        private static void Postfix(BloobColourChange __instance, int wingIndex)
+        private static void Postfix(int wingIndex)
         {
-            Debug.Log($"Index changed to {wingIndex}");
+            if (MultiplayerPatchPlugin.instance == null)
+                return;
+
+            MultiplayerPatchPlugin.instance.OnLocalWingChanged(wingIndex);
         }
     }
 
@@ -159,8 +162,38 @@ namespace Multi_bloob_adventure_idle
     public class BloobColourChangeHatPatch
     {
         [HarmonyPostfix]
-        private static void Postfix(BloobColourChange __instance)
+        private static void Postfix(int hatIndex)
         {
+            if (MultiplayerPatchPlugin.instance == null)
+                return;
+
+            MultiplayerPatchPlugin.instance.OnLocalHatChanged(hatIndex);
+        }
+    }
+
+    [HarmonyPatch(typeof(BloobColourChange), nameof(BloobColourChange.HideHat))]
+    public class BloobColourChangeHideHatPatch
+    {
+        [HarmonyPostfix]
+        private static void Postfix()
+        {
+            if (MultiplayerPatchPlugin.instance == null)
+                return;
+
+            MultiplayerPatchPlugin.instance.OnLocalHatChanged(-1);
+        }
+    }
+
+    [HarmonyPatch(typeof(BloobColourChange), nameof(BloobColourChange.HideWings))]
+    public class BloobColourChangeHideWingsPatch
+    {
+        [HarmonyPostfix]
+        private static void Postfix()
+        {
+            if (MultiplayerPatchPlugin.instance == null)
+                return;
+
+            MultiplayerPatchPlugin.instance.OnLocalWingChanged(-1);
         }
     }
 

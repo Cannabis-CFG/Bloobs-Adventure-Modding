@@ -113,6 +113,12 @@
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>..\References\UnityEngine.PhysicsModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.SpriteMaskModule">
+      <HintPath>H:\SteamLibrary\steamapps\common\Bloobs Adventure Idle\Bloobs Adventure Idle_Data\Managed\UnityEngine.SpriteMaskModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.SpriteShapeModule">
+      <HintPath>H:\SteamLibrary\steamapps\common\Bloobs Adventure Idle\Bloobs Adventure Idle_Data\Managed\UnityEngine.SpriteShapeModule.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
       <HintPath>..\References\UnityEngine.TextRenderingModule.dll</HintPath>
     </Reference>

@@ -42,6 +42,9 @@ namespace Multi_bloob_adventure_idle
         public static ConfigEntry<bool> enableContextMenu;
         private string nameCache;
         private string steamIdCache;
+        private int cachedActiveHatIndex = -1;
+        private int cachedActiveWingIndex = -1;
+        private bool customizationDirty;
         private bool atMm;
         private JObject lastPayload;
         public static MultiplayerPatchPlugin instance;
@@ -79,6 +82,8 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(PrestigeManagerLateUpdatePatch));
             Harmony.CreateAndPatchAll(typeof(BuildingManagerLateUpdatePatch));
             Harmony.CreateAndPatchAll(typeof(CharacterMovementHandleManualInputPatch));
+            Harmony.CreateAndPatchAll(typeof(BloobColourChangeHideHatPatch));
+            Harmony.CreateAndPatchAll(typeof(BloobColourChangeHideWingsPatch));
         }
 
         private void InitializeWebSocket()
@@ -324,6 +329,12 @@ namespace Multi_bloob_adventure_idle
                     case "steamId":
                         existing.steamId = prop.Value.ToObject<string>();
                         break;
+                    case "activeHatIndex":
+                        existing.activeHatIndex = prop.Value.ToObject<int>();
+                        break;
+                    case "activeWingIndex":
+                        existing.activeWingIndex = prop.Value.ToObject<int>();
+                        break;
                 }
             }
 
@@ -353,6 +364,7 @@ namespace Multi_bloob_adventure_idle
 
             TryResolveLocalPlayer(forceRefresh: true);
             RefreshSkillSnapshot(forceDirty: true);
+            RefreshLocalCustomizationCache();
 
             ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
             skillRefreshCoroutine ??= StartCoroutine(RefreshSkillDataEnumerator());
@@ -645,6 +657,8 @@ namespace Multi_bloob_adventure_idle
                     r = color.r
                 },
                 runSpeed = localPlayerCache.GetRunSpeed(),
+                activeHatIndex = cachedActiveHatIndex,
+                activeWingIndex = cachedActiveWingIndex,
                 cloneData = Array.Empty<string>()
             };
         }
@@ -789,6 +803,54 @@ namespace Multi_bloob_adventure_idle
                 "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
             //enableContextMenu = Config.Bind("Visual", "Enable Context Menu", true,
             //    "Enables a context menu when you right click to display overlapping ghosts");
+        }
+
+        private void RefreshLocalCustomizationCache()
+        {
+            var bloobColourChange = GameObject.FindObjectOfType<BloobColourChange>();
+            if (bloobColourChange == null)
+                return;
+
+            cachedActiveHatIndex = GetPrivateIntField(bloobColourChange, "activeHatIndex", -1);
+            cachedActiveWingIndex = GetPrivateIntField(bloobColourChange, "activeWingIndex", -1);
+            customizationDirty = true;
+        }
+
+        private int GetPrivateIntField(Component comp, string fieldName, int fallback = -1)
+        {
+            if (comp == null)
+                return fallback;
+
+            var field = comp.GetType().GetField(
+                fieldName,
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.IgnoreCase
+            );
+
+            if (field != null && field.FieldType == typeof(int))
+                return (int)field.GetValue(comp);
+
+            return fallback;
+        }
+
+        public void OnLocalHatChanged(int hatIndex)
+        {
+            if (cachedActiveHatIndex == hatIndex)
+                return;
+
+            cachedActiveHatIndex = hatIndex;
+            customizationDirty = true;
+        }
+
+        public void OnLocalWingChanged(int wingIndex)
+        {
+            if (cachedActiveWingIndex == wingIndex)
+                return;
+
+            cachedActiveWingIndex = wingIndex;
+            customizationDirty = true;
         }
 
         public void MainMenuClicked()

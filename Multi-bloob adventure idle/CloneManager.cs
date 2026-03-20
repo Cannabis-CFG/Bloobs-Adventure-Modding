@@ -36,6 +36,7 @@ namespace Multi_bloob_adventure_idle
 
             clone.SetColor(playerData.bloobColour?.ToColor() ?? Color.white);
             clone.SetPosition(playerData.currentPosition?.ToVector3() ?? Vector3.zero);
+            clone.UpdateCustomizations(playerData.activeHatIndex, playerData.activeWingIndex);
 
             // Remove unwanted stuff
             foreach (var collider in obj.GetComponents<CircleCollider2D>())
@@ -153,7 +154,7 @@ namespace Multi_bloob_adventure_idle
         public string SteamId { get; }
         public string PlayerName { get; private set; }
         public GameObject GameObject { get; }
-        public CharacterMovement Movement => GameObject != null ? GameObject.GetComponent<CharacterMovement>() : null;
+        public CharacterMovement Movement => GameObject?.GetComponent<CharacterMovement>();
 
         public Clone(string steamId, string playerName, GameObject obj)
         {
@@ -208,9 +209,60 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
-        public void UpdateCustomizations(string slot, string asset)
+        public void UpdateCustomizations(int hatIndex, int wingIndex)
         {
-            //TODO Pass hat/wings and update here
+            var bloobColourChange = GameObject.GetComponent<BloobColourChange>();
+            if (bloobColourChange == null)
+                return;
+
+            ApplyHat(bloobColourChange, hatIndex);
+            ApplyWing(bloobColourChange, wingIndex);
+        }
+
+        private void ApplyHat(BloobColourChange bloobColourChange, int hatIndex)
+        {
+            if (bloobColourChange.hatGameObject == null)
+                return;
+
+            if (hatIndex < 0)
+            {
+                bloobColourChange.hatGameObject.SetActive(false);
+                return;
+            }
+
+            if (bloobColourChange.hatChoices == null || hatIndex >= bloobColourChange.hatChoices.Length)
+                return;
+
+            var choice = bloobColourChange.hatChoices[hatIndex];
+            if (choice == null || choice.image == null)
+                return;
+
+            bloobColourChange.playerMask.sprite = choice.image;
+            bloobColourChange.playerImage.sprite = choice.image;
+            bloobColourChange.hatGameObject.SetActive(true);
+        }
+
+        private void ApplyWing(BloobColourChange bloobColourChange, int wingIndex)
+        {
+            if (bloobColourChange.wingGameObject == null)
+                return;
+
+            if (wingIndex < 0)
+            {
+                bloobColourChange.wingGameObject.SetActive(false);
+                return;
+            }
+
+            if (bloobColourChange.wingChoices == null || wingIndex >= bloobColourChange.wingChoices.Length)
+                return;
+
+            var choice = bloobColourChange.wingChoices[wingIndex];
+            if (choice == null || choice.image == null)
+                return;
+
+            bloobColourChange.wingMask.sprite = choice.image;
+            bloobColourChange.wingImage.sprite = choice.image;
+            bloobColourChange.wingGameObject.SetActive(true);
         }
 
         public void MoveTo(Vector2 target, float speed = -1f)

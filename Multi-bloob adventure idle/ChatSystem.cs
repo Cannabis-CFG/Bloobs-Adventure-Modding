@@ -185,8 +185,6 @@ namespace Multi_bloob_adventure_idle
         private float _statusUntil;
         private bool _isVisible = true;
         private bool _isInputActive;
-        private bool _focusInputNextFrame;
-        private bool _submitChatRequested;
         private bool _isPinned;
         private bool _isResizing;
         private Vector2 _resizeStartMouse;
@@ -209,7 +207,7 @@ namespace Multi_bloob_adventure_idle
         private ConfigEntry<bool> _windowPinnedConfig;
         private ConfigEntry<bool> _windowVisibleConfig;
 
-        private HashSet<string> _blockedSteamIds = new();
+        private HashSet<string> _blockedSteamIds = [];
 
         private List<PlayerResolutionCandidate> _pendingCandidates = new();
         private PendingSelectionMode _pendingSelectionMode = PendingSelectionMode.None;
@@ -768,7 +766,6 @@ namespace Multi_bloob_adventure_idle
         {
             _isVisible = true;
             _isInputActive = true;
-            _submitChatRequested = false;
             SaveWindowLayout();
 
             if (seedSlash && string.IsNullOrWhiteSpace(_input))
@@ -782,7 +779,6 @@ namespace Multi_bloob_adventure_idle
         public void CloseChat(bool clearInput)
         {
             _isInputActive = false;
-            _submitChatRequested = false;
 
             if (clearInput)
                 _input = "";
@@ -798,7 +794,6 @@ namespace Multi_bloob_adventure_idle
             if (!_isVisible)
             {
                 _isInputActive = false;
-                _submitChatRequested = false;
                 GUI.FocusControl(null);
             }
             SaveWindowLayout();

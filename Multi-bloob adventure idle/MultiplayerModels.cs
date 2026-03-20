@@ -12,8 +12,8 @@ namespace Multi_bloob_adventure_idle
         public bool isDisconnecting;
         public Vector3Like currentPosition;
         public float runSpeed;
-        public string hatName;
-        public string wingName;
+        public int activeHatIndex = -1;
+        public int activeWingIndex = -1;
         public ColourLike bloobColour;
 
         // Tuple storage is local. DTO storage is wire-safe.
