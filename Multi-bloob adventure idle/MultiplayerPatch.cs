@@ -18,7 +18,7 @@ using Image = UnityEngine.UI.Image;
 
 namespace Multi_bloob_adventure_idle
 {
-    [BepInPlugin("com.cannabis.multibloobidle", "Multibloob Adventure Idle", "1.2.1")]
+    [BepInPlugin("com.cannabis.multibloobidle", "Multibloob Adventure Idle", "1.3.0")]
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
         private readonly Queue<string> messageQueue = new Queue<string>();
@@ -357,7 +357,7 @@ namespace Multi_bloob_adventure_idle
 
             isReady = true;
             localPlayerCache.Clear();
-
+            CloneCustomizationCache.RefreshFromLocalPlayer();
             new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
             new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
             ChatSystem.Create(Config);

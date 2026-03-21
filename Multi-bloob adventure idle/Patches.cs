@@ -149,8 +149,12 @@ namespace Multi_bloob_adventure_idle
     public class BloobColourChangeWingPatch
     {
         [HarmonyPostfix]
-        private static void Postfix(int wingIndex)
+        private static void Postfix(BloobColourChange __instance, int wingIndex)
         {
+            var cloneComp = __instance.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+                return;
+
             if (MultiplayerPatchPlugin.instance == null)
                 return;
 
@@ -162,8 +166,12 @@ namespace Multi_bloob_adventure_idle
     public class BloobColourChangeHatPatch
     {
         [HarmonyPostfix]
-        private static void Postfix(int hatIndex)
+        private static void Postfix(BloobColourChange __instance, int hatIndex)
         {
+            var cloneComp = __instance.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+                return;
+
             if (MultiplayerPatchPlugin.instance == null)
                 return;
 
@@ -175,8 +183,12 @@ namespace Multi_bloob_adventure_idle
     public class BloobColourChangeHideHatPatch
     {
         [HarmonyPostfix]
-        private static void Postfix()
+        private static void Postfix(BloobColourChange __instance)
         {
+            var cloneComp = __instance.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+                return;
+
             if (MultiplayerPatchPlugin.instance == null)
                 return;
 
@@ -188,8 +200,12 @@ namespace Multi_bloob_adventure_idle
     public class BloobColourChangeHideWingsPatch
     {
         [HarmonyPostfix]
-        private static void Postfix()
+        private static void Postfix(BloobColourChange __instance)
         {
+            var cloneComp = __instance.GetComponent<IsMultiplayerClone>();
+            if (cloneComp != null)
+                return;
+
             if (MultiplayerPatchPlugin.instance == null)
                 return;
 

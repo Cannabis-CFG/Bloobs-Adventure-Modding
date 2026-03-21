@@ -36,7 +36,6 @@ namespace Multi_bloob_adventure_idle
 
             clone.SetColor(playerData.bloobColour?.ToColor() ?? Color.white);
             clone.SetPosition(playerData.currentPosition?.ToVector3() ?? Vector3.zero);
-            clone.UpdateCustomizations(playerData.activeHatIndex, playerData.activeWingIndex);
 
             // Remove unwanted stuff
             foreach (var collider in obj.GetComponents<CircleCollider2D>())
@@ -47,6 +46,9 @@ namespace Multi_bloob_adventure_idle
                 if (child.name != "wingSlot" && child.name != "Canvas" && child.name != "HatSlot")
                     Object.Destroy(child.gameObject);
             }
+
+            var customizationApplier = GetOrCreateCustomizationApplier(obj);
+            customizationApplier.ApplyAll(playerData.activeHatIndex, playerData.activeWingIndex);
 
             // Create nameplate
             if (obj.transform.Find("NamePlate") is null)
@@ -96,10 +98,12 @@ namespace Multi_bloob_adventure_idle
 
                 if (playerData.currentPosition != null)
                     clone.MoveTo(playerData.currentPosition.ToVector2(), playerData.runSpeed);
+                if (playerData.activeHatIndex >= -1 || playerData.activeWingIndex >= -1)
+                {
+                    var applier = GetOrCreateCustomizationApplier(clone.GameObject);
+                    applier.ApplyAll(playerData.activeHatIndex, playerData.activeWingIndex);
+                }
 
-                // Future customization sync entry point
-                // clone.UpdateCustomizations("hat", playerData.hatName);
-                // clone.UpdateCustomizations("wing", playerData.wingName);
             }
         }
 
@@ -147,6 +151,52 @@ namespace Multi_bloob_adventure_idle
         }
 
         public static IEnumerable<Clone> GetAllClones() => _clones.Values;
+
+        private static CloneCustomizationApplier GetOrCreateCustomizationApplier(GameObject obj)
+        {
+            var existing = obj.GetComponent<CloneCustomizationApplier>();
+            if (existing != null)
+                return existing;
+
+            Transform hatSlot = obj.transform.Find("HatSlot") ?? obj.transform.Find("hatSlot");
+            Transform wingSlot = obj.transform.Find("wingSlot") ?? obj.transform.Find("WingSlot");
+
+            GameObject hatObject = hatSlot != null ? hatSlot.gameObject : null;
+            GameObject wingObject = wingSlot != null ? wingSlot.gameObject : null;
+
+            SpriteRenderer hatRenderer = hatSlot != null ? hatSlot.GetComponent<SpriteRenderer>() : null;
+            SpriteRenderer wingRenderer = wingSlot != null ? wingSlot.GetComponent<SpriteRenderer>() : null;
+
+            SpriteMask hatMask = null;
+            SpriteMask wingMask = null;
+
+            if (hatSlot != null)
+            {
+                var hatMaskTransform = hatSlot.Find("Sprite Mask");
+                if (hatMaskTransform != null)
+                    hatMask = hatMaskTransform.GetComponent<SpriteMask>();
+            }
+
+            if (wingSlot != null)
+            {
+                var wingMaskTransform = wingSlot.Find("Sprite Mask");
+                if (wingMaskTransform != null)
+                    wingMask = wingMaskTransform.GetComponent<SpriteMask>();
+            }
+
+            var applier = obj.AddComponent<CloneCustomizationApplier>();
+            applier.Initialize(
+                hatObject,
+                wingObject,
+                hatRenderer,
+                wingRenderer,
+                hatMask,
+                wingMask
+            );
+
+            return applier;
+        }
+
     }
 
     public class Clone
@@ -209,15 +259,6 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
-        public void UpdateCustomizations(int hatIndex, int wingIndex)
-        {
-            var bloobColourChange = GameObject.GetComponent<BloobColourChange>();
-            if (bloobColourChange == null)
-                return;
-
-            ApplyHat(bloobColourChange, hatIndex);
-            ApplyWing(bloobColourChange, wingIndex);
-        }
 
         private void ApplyHat(BloobColourChange bloobColourChange, int hatIndex)
         {
