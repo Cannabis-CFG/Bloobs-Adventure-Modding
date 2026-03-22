@@ -44,7 +44,6 @@ namespace Multi_bloob_adventure_idle
         private string steamIdCache;
         private int cachedActiveHatIndex = -1;
         private int cachedActiveWingIndex = -1;
-        private bool customizationDirty;
         private bool atMm;
         private JObject lastPayload;
         public static MultiplayerPatchPlugin instance;
@@ -813,7 +812,6 @@ namespace Multi_bloob_adventure_idle
 
             cachedActiveHatIndex = GetPrivateIntField(bloobColourChange, "activeHatIndex", -1);
             cachedActiveWingIndex = GetPrivateIntField(bloobColourChange, "activeWingIndex", -1);
-            customizationDirty = true;
         }
 
         private int GetPrivateIntField(Component comp, string fieldName, int fallback = -1)
@@ -841,7 +839,6 @@ namespace Multi_bloob_adventure_idle
                 return;
 
             cachedActiveHatIndex = hatIndex;
-            customizationDirty = true;
         }
 
         public void OnLocalWingChanged(int wingIndex)
@@ -850,7 +847,6 @@ namespace Multi_bloob_adventure_idle
                 return;
 
             cachedActiveWingIndex = wingIndex;
-            customizationDirty = true;
         }
 
         public void MainMenuClicked()
@@ -945,8 +941,7 @@ namespace Multi_bloob_adventure_idle
 
             var mainMenu = settingsUi.Find("Main Menu")?.gameObject;
             var button = mainMenu?.GetComponent<Button>();
-            if (button != null)
-                button.onClick.AddListener(MainMenuClicked);
+            button?.onClick.AddListener(MainMenuClicked);
 
             var soundOff = settingsUi.Find("Sound Off");
             if (soundOff == null)

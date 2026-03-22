@@ -136,8 +136,10 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ChatInputOverlay.cs" />
+    <Compile Include="ChatModels.cs" />
     <Compile Include="ChatSystem.cs" />
+    <Compile Include="ChatThemeSettings.cs" />
+    <Compile Include="ChatWindowUi.cs" />
     <Compile Include="CloneCustomizationApplier.cs" />
     <Compile Include="CloneCustomizationCache.cs" />
     <Compile Include="CloneManager.cs" />
