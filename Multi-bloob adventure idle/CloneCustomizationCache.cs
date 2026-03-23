@@ -5,8 +5,8 @@ namespace Multi_bloob_adventure_idle
 {
     public static class CloneCustomizationCache
     {
-        private static Sprite[] _hatSprites = System.Array.Empty<Sprite>();
-        private static Sprite[] _wingSprites = System.Array.Empty<Sprite>();
+        private static Sprite[] _hatSprites = [];
+        private static Sprite[] _wingSprites = [];
 
         public static bool IsReady => _hatSprites.Length > 0 || _wingSprites.Length > 0;
 
@@ -17,12 +17,12 @@ namespace Multi_bloob_adventure_idle
                 return;
 
             _hatSprites = bloobColourChange.hatChoices != null
-                ? bloobColourChange.hatChoices.Select(x => x != null ? x.image : null).ToArray()
-                : System.Array.Empty<Sprite>();
+                ? [.. bloobColourChange.hatChoices.Select(x => x?.image)]
+                : [];
 
             _wingSprites = bloobColourChange.wingChoices != null
-                ? bloobColourChange.wingChoices.Select(x => x != null ? x.image : null).ToArray()
-                : System.Array.Empty<Sprite>();
+                ? [.. bloobColourChange.wingChoices.Select(x => x?.image)]
+                : [];
         }
 
         public static Sprite GetHatSprite(int index)

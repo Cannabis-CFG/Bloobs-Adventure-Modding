@@ -6,7 +6,7 @@ namespace Multi_bloob_adventure_idle
 {
     public class CloneManager
     {
-        private static Dictionary<string, Clone> _clones = new Dictionary<string, Clone>();
+        private static readonly Dictionary<string, Clone> _clones = [];
 
         public static Clone GetClone(string steamId)
         {
@@ -25,14 +25,11 @@ namespace Multi_bloob_adventure_idle
             var obj = Object.Instantiate(originalPrefab);
             obj.name = "BloobClone_" + playerData.steamId;
 
-            var cloneMarker = obj.GetComponent<IsMultiplayerClone>();
-            if (cloneMarker == null)
-                cloneMarker = obj.AddComponent<IsMultiplayerClone>();
-
+            var cloneMarker = obj.GetComponent<IsMultiplayerClone>() ?? obj.AddComponent<IsMultiplayerClone>();
             cloneMarker.steamId = playerData.steamId;
             cloneMarker.displayName = playerData.name;
 
-            Clone clone = new Clone(playerData.steamId, playerData.name, obj);
+            Clone clone = new(playerData.steamId, playerData.name, obj);
 
             clone.SetColor(playerData.bloobColour?.ToColor() ?? Color.white);
             clone.SetPosition(playerData.currentPosition?.ToVector3() ?? Vector3.zero);
@@ -161,11 +158,11 @@ namespace Multi_bloob_adventure_idle
             Transform hatSlot = obj.transform.Find("HatSlot") ?? obj.transform.Find("hatSlot");
             Transform wingSlot = obj.transform.Find("wingSlot") ?? obj.transform.Find("WingSlot");
 
-            GameObject hatObject = hatSlot != null ? hatSlot.gameObject : null;
-            GameObject wingObject = wingSlot != null ? wingSlot.gameObject : null;
+            GameObject hatObject = hatSlot?.gameObject;
+            GameObject wingObject = wingSlot?.gameObject;
 
-            SpriteRenderer hatRenderer = hatSlot != null ? hatSlot.GetComponent<SpriteRenderer>() : null;
-            SpriteRenderer wingRenderer = wingSlot != null ? wingSlot.GetComponent<SpriteRenderer>() : null;
+            SpriteRenderer hatRenderer = hatSlot?.GetComponent<SpriteRenderer>();
+            SpriteRenderer wingRenderer = wingSlot?.GetComponent<SpriteRenderer>();
 
             SpriteMask hatMask = null;
             SpriteMask wingMask = null;
@@ -199,19 +196,12 @@ namespace Multi_bloob_adventure_idle
 
     }
 
-    public class Clone
+    public class Clone(string steamId, string playerName, GameObject obj)
     {
-        public string SteamId { get; }
-        public string PlayerName { get; private set; }
-        public GameObject GameObject { get; }
+        public string SteamId { get; } = steamId;
+        public string PlayerName { get; private set; } = playerName;
+        public GameObject GameObject { get; } = obj;
         public CharacterMovement Movement => GameObject?.GetComponent<CharacterMovement>();
-
-        public Clone(string steamId, string playerName, GameObject obj)
-        {
-            SteamId = steamId;
-            PlayerName = playerName;
-            GameObject = obj;
-        }
 
         //BUG NRE at GetComponent at unknown times, did not catch error live. Only happened 1 time so far.
         public void SetColor(Color color)
@@ -322,6 +312,6 @@ namespace Multi_bloob_adventure_idle
             cm.MoveTo(target);
         }
 
-        private Vector2 ToVector2(Vector3 vector3) => new Vector2(vector3.x, vector3.y);
+        private Vector2 ToVector2(Vector3 vector3) => new(vector3.x, vector3.y);
     }
 }

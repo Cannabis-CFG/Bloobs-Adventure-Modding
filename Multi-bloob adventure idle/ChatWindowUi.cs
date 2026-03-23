@@ -8,7 +8,6 @@ namespace Multi_bloob_adventure_idle
 {
     public class ChatWindowUi : MonoBehaviour
     {
-        private const bool DebugHitboxes = false;
         private const float HeaderHeight = 38f;
         private const float ButtonHeight = 34f;
         private const float ResizeHandleSize = 28f;
@@ -59,6 +58,7 @@ namespace Multi_bloob_adventure_idle
 
         private ScrollRect _messageScroll;
         private RectTransform _messageContent;
+        private Image _messageViewportImage;
         private bool _autoScrollEnabled = true;
         private bool _suppressScrollEvents;
         private float _lastMessageContentHeight;
@@ -66,14 +66,19 @@ namespace Multi_bloob_adventure_idle
         private TMP_InputField _inputField;
         private Outline _inputOutline;
         private TextMeshProUGUI _inputText;
+        private Image _inputBackgroundImage;
         private TextMeshProUGUI _charCounterText;
         private TextMeshProUGUI _statusText;
         private TextMeshProUGUI _inputHintText;
 
+        private Image _privateTabsBackgroundImage;
+        private Image _resizeHandleImage;
+        private Outline _titleMenuOutline;
+        private Image _titleMenuBackgroundImage;
+
         private int _lastSubmitFrame = -1;
 
         public ChatTab ActiveTab { get; set; } = ChatTab.Global;
-
         public string CurrentInputText
         {
             get => _inputField != null ? _inputField.text : "";
@@ -92,7 +97,6 @@ namespace Multi_bloob_adventure_idle
         {
             _chat = chat;
             _theme = theme;
-
             EnsureEventSystem();
             BuildUi();
             ApplyTheme();
@@ -120,7 +124,6 @@ namespace Multi_bloob_adventure_idle
         {
             if (_canvas != null)
                 _canvas.enabled = visible;
-
             if (!visible)
                 SetTitleMenuOpen(false);
         }
@@ -129,7 +132,6 @@ namespace Multi_bloob_adventure_idle
         {
             if (_inputField == null)
                 return;
-
             _inputField.ActivateInputField();
             _inputField.Select();
             _inputField.caretPosition = _inputField.text?.Length ?? 0;
@@ -139,9 +141,7 @@ namespace Multi_bloob_adventure_idle
 
         public void BlurInput()
         {
-            if (_inputField != null)
-                _inputField.DeactivateInputField();
-
+            _inputField?.DeactivateInputField();
             UpdateInputPlaceholderState();
             UpdateInputVisualState();
         }
@@ -227,9 +227,8 @@ namespace Multi_bloob_adventure_idle
             resizeHandle.sizeDelta = new Vector2(ResizeHandleSize, ResizeHandleSize);
             resizeHandle.anchoredPosition = new Vector2(-6f, 6f);
 
-            var resizeImage = resizeHandle.gameObject.AddComponent<Image>();
-            resizeImage.raycastTarget = true;
-            resizeImage.color = DebugHitboxes ? new Color(1f, 0f, 1f, 0.22f) : new Color(1f, 1f, 1f, 0.08f);
+            _resizeHandleImage = resizeHandle.gameObject.AddComponent<Image>();
+            _resizeHandleImage.raycastTarget = true;
 
             var resizeText = CreateTmpText("ResizeText", resizeHandle, "//", 14f, TextAlignmentOptions.Center);
             resizeText.enableWordWrapping = false;
@@ -269,28 +268,24 @@ namespace Multi_bloob_adventure_idle
             _titleMenuRoot = root.gameObject;
             _titleMenuRoot.SetActive(false);
 
-            var bg = _titleMenuRoot.AddComponent<Image>();
-            bg.color = DebugHitboxes ? new Color(0f, 0f, 1f, 0.22f) : new Color(0.12f, 0.12f, 0.12f, 0.98f);
-
-            var outline = _titleMenuRoot.AddComponent<Outline>();
-            outline.effectColor = new Color(0f, 0f, 0f, 0.5f);
+            _titleMenuBackgroundImage = _titleMenuRoot.AddComponent<Image>();
+            _titleMenuOutline = _titleMenuRoot.AddComponent<Outline>();
 
             var rootLayout = _titleMenuRoot.AddComponent<LayoutElement>();
             rootLayout.ignoreLayout = true;
 
-            var scroll = _titleMenuRoot.AddComponent<ScrollRect>();
-            scroll.horizontal = false;
-            scroll.vertical = true;
-            scroll.movementType = ScrollRect.MovementType.Clamped;
-            scroll.scrollSensitivity = 28f;
-            _titleMenuScroll = scroll;
+            _titleMenuScroll = _titleMenuRoot.AddComponent<ScrollRect>();
+            _titleMenuScroll.horizontal = false;
+            _titleMenuScroll.vertical = true;
+            _titleMenuScroll.movementType = ScrollRect.MovementType.Clamped;
+            _titleMenuScroll.scrollSensitivity = 28f;
 
             var viewport = CreateRect("Viewport", root);
             Stretch(viewport);
             var viewportImage = viewport.gameObject.AddComponent<Image>();
-            viewportImage.color = new Color(1f, 1f, 1f, DebugHitboxes ? 0.08f : 0.01f);
+            viewportImage.color = new Color(1f, 1f, 1f, 0.01f);
             viewport.gameObject.AddComponent<Mask>().showMaskGraphic = false;
-            scroll.viewport = viewport;
+            _titleMenuScroll.viewport = viewport;
 
             _titleMenuContent = CreateRect("Content", viewport, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f));
             var contentLayout = _titleMenuContent.gameObject.AddComponent<VerticalLayoutGroup>();
@@ -301,7 +296,7 @@ namespace Multi_bloob_adventure_idle
 
             var fitter = _titleMenuContent.gameObject.AddComponent<ContentSizeFitter>();
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-            scroll.content = _titleMenuContent;
+            _titleMenuScroll.content = _titleMenuContent;
         }
 
         private void BuildPrivateTabsRow()
@@ -315,8 +310,7 @@ namespace Multi_bloob_adventure_idle
             scrollRootLayout.minHeight = HeaderHeight;
             scrollRootLayout.flexibleWidth = 1f;
 
-            var scrollImage = scrollRoot.gameObject.AddComponent<Image>();
-            scrollImage.color = DebugHitboxes ? new Color(0f, 0.8f, 1f, 0.18f) : new Color(0f, 0f, 0f, 0.15f);
+            _privateTabsBackgroundImage = scrollRoot.gameObject.AddComponent<Image>();
 
             var scroll = scrollRoot.gameObject.AddComponent<ScrollRect>();
             scroll.horizontal = true;
@@ -327,7 +321,7 @@ namespace Multi_bloob_adventure_idle
             var viewport = CreateRect("Viewport", scrollRoot);
             Stretch(viewport);
             var viewportImage = viewport.gameObject.AddComponent<Image>();
-            viewportImage.color = DebugHitboxes ? new Color(0f, 1f, 0f, 0.08f) : new Color(1f, 1f, 1f, 0.01f);
+            viewportImage.color = new Color(1f, 1f, 1f, 0.01f);
             viewport.gameObject.AddComponent<Mask>().showMaskGraphic = false;
             scroll.viewport = viewport;
 
@@ -351,8 +345,7 @@ namespace Multi_bloob_adventure_idle
             viewportLayout.flexibleHeight = 1f;
             viewportLayout.minHeight = 120f;
 
-            var viewportImage = viewport.gameObject.AddComponent<Image>();
-            viewportImage.color = DebugHitboxes ? new Color(1f, 1f, 0f, 0.08f) : new Color(0f, 0f, 0f, 0.12f);
+            _messageViewportImage = viewport.gameObject.AddComponent<Image>();
             viewport.gameObject.AddComponent<Mask>().showMaskGraphic = false;
 
             _messageScroll = viewport.gameObject.AddComponent<ScrollRect>();
@@ -388,8 +381,7 @@ namespace Multi_bloob_adventure_idle
             inputLayout.preferredHeight = InputHeight;
             inputLayout.minHeight = InputHeight;
 
-            var inputBg = inputRoot.gameObject.AddComponent<Image>();
-            inputBg.color = DebugHitboxes ? new Color(0f, 1f, 1f, 0.15f) : Color.white;
+            _inputBackgroundImage = inputRoot.gameObject.AddComponent<Image>();
             _inputOutline = inputRoot.gameObject.AddComponent<Outline>();
             _inputOutline.effectDistance = new Vector2(1f, -1f);
 
@@ -408,8 +400,7 @@ namespace Multi_bloob_adventure_idle
 
             var textViewport = CreateRect("TextViewport", inputRoot);
             Stretch(textViewport);
-            var textViewportImage = textViewport.gameObject.AddComponent<Image>();
-            textViewportImage.color = new Color(1f, 1f, 1f, 0f);
+            textViewport.gameObject.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0f);
 
             var textRect = CreateRect("Text", textViewport);
             Stretch(textRect, new Vector2(8f, 4f), new Vector2(-8f, -4f));
@@ -428,7 +419,6 @@ namespace Multi_bloob_adventure_idle
             _inputHintText.enableWordWrapping = false;
             _inputHintText.overflowMode = TextOverflowModes.Ellipsis;
             _inputHintText.alignment = TextAlignmentOptions.TopLeft;
-            _inputHintText.color = new Color(1f, 1f, 1f, 0.45f);
             _inputHintText.raycastTarget = false;
             _inputField.placeholder = _inputHintText;
 
@@ -464,6 +454,19 @@ namespace Multi_bloob_adventure_idle
             _windowBorder.effectColor = _theme.GetBorderColor();
             _windowRoot.localScale = Vector3.one * Mathf.Clamp(_theme.UiScale.Value, 0.75f, 2f);
 
+            if (_messageViewportImage != null)
+                _messageViewportImage.color = _theme.GetMessagesViewportColor();
+            if (_privateTabsBackgroundImage != null)
+                _privateTabsBackgroundImage.color = _theme.GetPrivateTabsBackgroundColor();
+            if (_titleMenuBackgroundImage != null)
+                _titleMenuBackgroundImage.color = _theme.GetTitleMenuBackgroundColor();
+            if (_titleMenuOutline != null)
+                _titleMenuOutline.effectColor = _theme.GetTitleMenuOutlineColor();
+            if (_resizeHandleImage != null)
+                _resizeHandleImage.color = _theme.GetResizeHandleColor();
+            if (_inputBackgroundImage != null)
+                _inputBackgroundImage.color = _theme.GetInputBackgroundColor();
+
             float fontSize = _theme.GetScaledFontSize();
             _globalTabText.fontSize = fontSize;
             _privateTabText.fontSize = fontSize;
@@ -473,17 +476,10 @@ namespace Multi_bloob_adventure_idle
             _inputText.fontSize = fontSize;
             _inputText.color = _theme.GetInputTextColor();
             _inputHintText.fontSize = fontSize;
+            _inputHintText.color = _theme.GetInputPlaceholderColor();
             _statusText.fontSize = fontSize - 3f;
-            _statusText.color = _theme.GetTimestampColor();
-            if (_charCounterText != null)
-            {
-                _charCounterText.fontSize = fontSize - 3f;
-                _charCounterText.color = _theme.GetTimestampColor();
-            }
-
-            var inputBg = _inputField.GetComponent<Image>();
-            if (inputBg != null)
-                inputBg.color = DebugHitboxes ? new Color(0f, 1f, 1f, 0.15f) : _theme.GetInputBackgroundColor();
+            _statusText.color = _theme.GetStatusTextColor();
+            _charCounterText.fontSize = fontSize - 3f;
 
             ApplyWindowRect(_theme.GetWindowRect());
             PositionTitleMenu();
@@ -496,22 +492,22 @@ namespace Multi_bloob_adventure_idle
             _systemTabText.text = _chat.BuildTabLabel(ChatTab.System);
 
             string titleLabel = "Title: None";
-            foreach (var title in _chat.GetUnlockedTitles())
+            foreach (var (id, label) in _chat.GetUnlockedTitles())
             {
-                if (title.id == _chat.ActiveTitleId)
+                if (id == _chat.ActiveTitleId)
                 {
-                    titleLabel = $"Title: {title.label}";
+                    titleLabel = "Title: " + label;
                     break;
                 }
             }
             _titleButtonText.text = titleLabel;
-
             _pinButtonText.text = _chat.IsPinned ? "Unpin" : "Pin";
 
             SetButtonSelected(_globalTabButton, _chat.CurrentTab == ChatTab.Global);
             SetButtonSelected(_privateTabButton, _chat.CurrentTab == ChatTab.Private);
             SetButtonSelected(_systemTabButton, _chat.CurrentTab == ChatTab.System);
             SetButtonSelected(_titleButton, _titleMenuOpen);
+            SetButtonSelected(_pinButton, _chat.IsPinned);
         }
 
         private void RebuildPrivateTabs()
@@ -550,17 +546,17 @@ namespace Multi_bloob_adventure_idle
                 SetTitleMenuOpen(false);
             });
 
-            foreach (var title in _chat.GetUnlockedTitles())
+            foreach (var (id, label) in _chat.GetUnlockedTitles())
             {
-                var button = CreateButton("Title_" + title.id, _titleMenuContent, out _, title.label, TitleMenuWidth - 16f);
-                string titleId = title.id;
+                var button = CreateButton("Title_" + id, _titleMenuContent, out _, label, TitleMenuWidth - 16f);
+                string titleId = id;
                 button.onClick.AddListener(() =>
                 {
                     _chat.SelectTitle(titleId);
                     SetTitleMenuOpen(false);
                 });
 
-                if (title.id == _chat.ActiveTitleId)
+                if (id == _chat.ActiveTitleId)
                     SetButtonSelected(button, true);
             }
 
@@ -585,19 +581,18 @@ namespace Multi_bloob_adventure_idle
 
             _charCounterText.text = max > 0 ? $"{current}/{max}" : current.ToString();
             _charCounterText.color = (max > 0 && current >= max)
-                ? new Color(1f, 0.35f, 0.35f, 1f)
-                : _theme.GetTimestampColor();
+                ? _theme.GetCharCounterMaxColor()
+                : _theme.GetCharCounterColor();
 
             _inputOutline.effectColor = (max > 0 && current >= max)
-                ? new Color(1f, 0.2f, 0.2f, 0.95f)
-                : (DebugHitboxes ? new Color(0f, 1f, 1f, 0.45f) : new Color(0f, 0f, 0f, 0.55f));
+                ? _theme.GetInputOutlineMaxColor()
+                : _theme.GetInputOutlineColor();
         }
 
         private void SetTitleMenuOpen(bool open)
         {
             _titleMenuOpen = open;
-            if (_titleMenuRoot != null)
-                _titleMenuRoot.SetActive(open);
+            _titleMenuRoot?.SetActive(open);
 
             if (open)
             {
@@ -618,11 +613,8 @@ namespace Multi_bloob_adventure_idle
             Vector3[] corners = new Vector3[4];
             titleRt.GetWorldCorners(corners);
 
-            float x = corners[0].x;
-            float y = Screen.height - corners[0].y + 2f;
-
-            x = Mathf.Clamp(x, 0f, Mathf.Max(0f, Screen.width - TitleMenuWidth));
-            y = Mathf.Clamp(y, 0f, Mathf.Max(0f, Screen.height - TitleMenuHeight));
+            float x = Mathf.Clamp(corners[0].x, 0f, Mathf.Max(0f, Screen.width - TitleMenuWidth));
+            float y = Mathf.Clamp(Screen.height - corners[0].y + 2f, 0f, Mathf.Max(0f, Screen.height - TitleMenuHeight));
 
             rootRt.sizeDelta = new Vector2(TitleMenuWidth, TitleMenuHeight);
             rootRt.anchoredPosition = new Vector2(x, -y);
@@ -668,7 +660,6 @@ namespace Multi_bloob_adventure_idle
                 float headerFontSize = _theme.GetScaledFontSize() - 2f;
                 float bodyFontSize = _theme.GetScaledFontSize() - 1f;
 
-                // Header viewport
                 var headerViewport = CreateRect("HeaderViewport", row.transform);
                 headerViewport.anchorMin = new Vector2(0f, 1f);
                 headerViewport.anchorMax = new Vector2(0f, 1f);
@@ -710,7 +701,6 @@ namespace Multi_bloob_adventure_idle
                 headerContent.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, headerPreferred.y);
                 headerViewport.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, headerPreferred.y);
 
-                // Body viewport
                 var bodyViewport = CreateRect("BodyViewport", row.transform);
                 bodyViewport.anchorMin = new Vector2(0f, 1f);
                 bodyViewport.anchorMax = new Vector2(0f, 1f);
@@ -753,10 +743,7 @@ namespace Multi_bloob_adventure_idle
                 bodyContent.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, bodyPreferred.y);
                 bodyViewport.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, bodyPreferred.y);
 
-                float finalHeight = Mathf.Max(
-                    32f,
-                    topPadding + headerPreferred.y + 2f + bodyPreferred.y + bottomPadding
-                );
+                float finalHeight = Mathf.Max(32f, topPadding + headerPreferred.y + 2f + bodyPreferred.y + bottomPadding);
 
                 rowLayout.preferredHeight = finalHeight;
                 rowLayout.minHeight = finalHeight;
@@ -780,13 +767,7 @@ namespace Multi_bloob_adventure_idle
             if (_suppressScrollEvents || _messageScroll == null)
                 return;
 
-            if (IsScrolledToBottom())
-            {
-                _autoScrollEnabled = true;
-                return;
-            }
-
-            _autoScrollEnabled = false;
+            _autoScrollEnabled = IsScrolledToBottom();
         }
 
         private bool IsScrolledToBottom(float threshold = 0.001f)
@@ -820,13 +801,11 @@ namespace Multi_bloob_adventure_idle
         private void SetButtonSelected(Button button, bool selected)
         {
             var image = button.GetComponent<Image>();
-            if (image == null)
-                return;
-
-            if (selected)
-                image.color = DebugHitboxes ? new Color(1f, 0.5f, 0f, 0.45f) : _theme.GetAccentColor();
-            else
-                image.color = DebugHitboxes ? new Color(1f, 0f, 0f, 0.22f) : new Color(0.18f, 0.18f, 0.18f, 1f);
+            var text = button.GetComponentInChildren<TextMeshProUGUI>(true);
+            if (image != null)
+                image.color = selected ? _theme.GetSelectedTabColor() : _theme.GetTabColor();
+            if (text != null)
+                text.color = selected ? _theme.GetSelectedTabTextColor() : _theme.GetTabTextColor();
         }
 
         private string BuildHeaderText(ChatUiMessage msg)
@@ -837,13 +816,8 @@ namespace Multi_bloob_adventure_idle
             string displayName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(msg.FromSteamId, msg.DisplayName);
             string otherName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(msg.ToSteamId, msg.OtherPartyName);
 
-            string titledDisplayName = string.IsNullOrWhiteSpace(msg.ActiveTitle)
-                ? displayName
-                : $"[{msg.ActiveTitle}] {displayName}";
-
-            string titledOtherName = string.IsNullOrWhiteSpace(msg.OtherPartyTitle)
-                ? otherName
-                : $"[{msg.OtherPartyTitle}] {otherName}";
+            string titledDisplayName = string.IsNullOrWhiteSpace(msg.ActiveTitle) ? displayName : $"[{msg.ActiveTitle}] {displayName}";
+            string titledOtherName = string.IsNullOrWhiteSpace(msg.OtherPartyTitle) ? otherName : $"[{msg.OtherPartyTitle}] {otherName}";
 
             return msg.Kind switch
             {
@@ -860,7 +834,7 @@ namespace Multi_bloob_adventure_idle
 
         private string BuildBodyText(ChatUiMessage msg)
         {
-            return $"{msg.Message}" ?? "";
+            return msg.Message ?? "";
         }
 
         private Color GetHeaderTextColor(ChatUiMessage msg)
@@ -869,29 +843,29 @@ namespace Multi_bloob_adventure_idle
             {
                 ChatMessageKind.SystemCritical => new Color(1f, 0.86f, 0.86f, 1f),
                 ChatMessageKind.Error => new Color(1f, 0.82f, 0.82f, 1f),
-                _ => Color.white
+                _ => _theme.GetHeaderTextColor()
             };
         }
 
-        private static Color GetMessageRowColor(ChatUiMessage msg)
+        private Color GetMessageRowColor(ChatUiMessage msg)
         {
             return msg.Kind switch
             {
-                ChatMessageKind.SystemImportant => new Color(0.38f, 0.28f, 0.02f, 0.55f),
-                ChatMessageKind.SystemCritical => new Color(0.42f, 0.08f, 0.08f, 0.62f),
-                ChatMessageKind.Error => new Color(0.35f, 0.1f, 0.1f, 0.62f),
-                ChatMessageKind.Private => new Color(0.08f, 0.14f, 0.32f, 0.38f),
-                _ => new Color(1f, 1f, 1f, 0.04f)
+                ChatMessageKind.SystemImportant => _theme.GetMessageImportantBackgroundColor(),
+                ChatMessageKind.SystemCritical => _theme.GetMessageCriticalBackgroundColor(),
+                ChatMessageKind.Error => _theme.GetMessageErrorBackgroundColor(),
+                ChatMessageKind.Private => _theme.GetMessagePrivateBackgroundColor(),
+                _ => _theme.GetMessageGlobalBackgroundColor()
             };
         }
 
-        private static Color GetMessageTextColor(ChatUiMessage msg)
+        private Color GetMessageTextColor(ChatUiMessage msg)
         {
             return msg.Kind switch
             {
                 ChatMessageKind.SystemCritical => new Color(1f, 0.86f, 0.86f, 1f),
                 ChatMessageKind.Error => new Color(1f, 0.82f, 0.82f, 1f),
-                _ => Color.white
+                _ => _theme.GetBodyTextColor()
             };
         }
 
@@ -907,7 +881,6 @@ namespace Multi_bloob_adventure_idle
                 return;
 
             float scale = Mathf.Clamp(_windowRoot.localScale.x, 0.75f, 2f);
-
             var rect = _chat.GetWindowRect();
             rect.x += delta.x / scale;
             rect.y -= delta.y / scale;
@@ -1001,9 +974,7 @@ namespace Multi_bloob_adventure_idle
             var rt = CreateRect(name, parent);
             rt.sizeDelta = new Vector2(width, ButtonHeight);
 
-            var image = rt.gameObject.AddComponent<Image>();
-            image.color = DebugHitboxes ? new Color(1f, 0f, 0f, 0.22f) : new Color(0.18f, 0.18f, 0.18f, 1f);
-
+            rt.gameObject.AddComponent<Image>();
             var button = rt.gameObject.AddComponent<Button>();
 
             var layout = rt.gameObject.AddComponent<LayoutElement>();
@@ -1045,36 +1016,16 @@ namespace Multi_bloob_adventure_idle
     public sealed class ChatWindowDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
     {
         private ChatWindowUi _ui;
-
-        public void Initialize(ChatWindowUi ui)
-        {
-            _ui = ui;
-        }
-
+        public void Initialize(ChatWindowUi ui) { _ui = ui; }
         public void OnBeginDrag(PointerEventData eventData) { }
-
-        public void OnDrag(PointerEventData eventData)
-        {
-            if (_ui != null)
-                _ui.MoveWindow(eventData.delta);
-        }
+        public void OnDrag(PointerEventData eventData) { _ui?.MoveWindow(eventData.delta); }
     }
 
     public sealed class ChatWindowResizeHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
     {
         private ChatWindowUi _ui;
-
-        public void Initialize(ChatWindowUi ui)
-        {
-            _ui = ui;
-        }
-
+        public void Initialize(ChatWindowUi ui) { _ui = ui; }
         public void OnBeginDrag(PointerEventData eventData) { }
-
-        public void OnDrag(PointerEventData eventData)
-        {
-            if (_ui != null)
-                _ui.ResizeWindow(eventData.delta);
-        }
+        public void OnDrag(PointerEventData eventData) { _ui?.ResizeWindow(eventData.delta); }
     }
 }

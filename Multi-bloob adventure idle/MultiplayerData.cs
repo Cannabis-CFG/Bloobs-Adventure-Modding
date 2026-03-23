@@ -16,9 +16,9 @@ namespace Multi_bloob_adventure_idle
             if (forceRefresh || !IsValid())
             {
                 PlayerRoot = GameObject.Find("BloobCharacter");
-                PlayerTransform = PlayerRoot != null ? PlayerRoot.transform : null;
-                PlayerSpriteRenderer = PlayerRoot != null ? PlayerRoot.GetComponent<SpriteRenderer>() : null;
-                PlayerMovement = PlayerRoot != null ? PlayerRoot.GetComponent<CharacterMovement>() : null;
+                PlayerTransform = PlayerRoot?.transform;
+                PlayerSpriteRenderer = PlayerRoot?.GetComponent<SpriteRenderer>();
+                PlayerMovement = PlayerRoot?.GetComponent<CharacterMovement>();
             }
 
             return IsValid();
@@ -48,13 +48,13 @@ namespace Multi_bloob_adventure_idle
 
     public sealed class SkillDataCache
     {
-        private static readonly Dictionary<string, string> NameMap = new Dictionary<string, string>
+        private static readonly Dictionary<string, string> NameMap = new()
         {
             { "WoodCutting", "Woodcutting" }
         };
 
-        private static readonly HashSet<string> IgnoredChildren = new HashSet<string>
-        {
+        private static readonly HashSet<string> IgnoredChildren =
+        [
             "Weapon Point",
             "MagicWeapon Point",
             "RangeWeapon Point",
@@ -65,10 +65,10 @@ namespace Multi_bloob_adventure_idle
             "wingSlot",
             "hatSlot",
             "Canvas"
-        };
+        ];
 
-        private Dictionary<string, (int level, int prestige)> snapshot = new Dictionary<string, (int level, int prestige)>();
-        private Dictionary<string, SkillTupleDto> dtoSnapshot = new Dictionary<string, SkillTupleDto>();
+        private Dictionary<string, (int level, int prestige)> snapshot = [];
+        private Dictionary<string, SkillTupleDto> dtoSnapshot = [];
 
         public bool IsDirty { get; private set; }
 
@@ -147,53 +147,38 @@ namespace Multi_bloob_adventure_idle
 
         private static string ResolveSkillClassName(string childName)
         {
-            switch (childName)
+            return childName switch
             {
-                case "SoulBinding":
-                    return "SoulBinding";
-                case "Homesteading":
-                    return "HomeSteadingSkill";
-                default:
-                    return childName + "Skill";
-            }
+                "SoulBinding" => "SoulBinding",
+                "Homesteading" => "HomeSteadingSkill",
+                _ => childName + "Skill",
+            };
         }
 
         private static string ResolveLevelFieldName(string childName)
         {
-            switch (childName)
+            return childName switch
             {
-                case "HitPoints":
-                    return "HitPointsLevel";
-                case "Mining":
-                    return "MiningLevel";
-                case "WoodCutting":
-                    return "woodcuttinglevel";
-                case "SoulBinding":
-                    return "SoulBindingLevel";
-                case "Thieving":
-                    return "ThievingLevel";
-                case "Fishing":
-                    return "FishingLevel";
-                default:
-                    return childName + "Level";
-            }
+                "HitPoints" => "HitPointsLevel",
+                "Mining" => "MiningLevel",
+                "WoodCutting" => "woodcuttinglevel",
+                "SoulBinding" => "SoulBindingLevel",
+                "Thieving" => "ThievingLevel",
+                "Fishing" => "FishingLevel",
+                _ => childName + "Level",
+            };
         }
 
         private static string ResolvePrestigeFieldName(string childName)
         {
-            switch (childName)
+            return childName switch
             {
-                case "HitPoints":
-                    return "HitPointsPrestigeLevel";
-                case "SoulBinding":
-                    return "SoulBindingPrestigeLevel";
-                case "BowCrafting":
-                    return "bowCraftingPrestigeLevel";
-                case "BeastMastery":
-                    return "beastMasteryPrestigeLevel";
-                default:
-                    return childName.ToLower() + "PrestigeLevel";
-            }
+                "HitPoints" => "HitPointsPrestigeLevel",
+                "SoulBinding" => "SoulBindingPrestigeLevel",
+                "BowCrafting" => "bowCraftingPrestigeLevel",
+                "BeastMastery" => "beastMasteryPrestigeLevel",
+                _ => childName.ToLower() + "PrestigeLevel",
+            };
         }
 
         private static int ReadIntField(Component comp, string fieldName)

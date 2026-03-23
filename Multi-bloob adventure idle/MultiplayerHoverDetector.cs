@@ -31,7 +31,7 @@ public class MultiplayerHoverDetector : MonoBehaviour
             return;
 
         Vector3 worldPoint3D = cam.ScreenToWorldPoint(Input.mousePosition);
-        Vector2 worldPoint2D = new Vector2(worldPoint3D.x, worldPoint3D.y);
+        Vector2 worldPoint2D = new(worldPoint3D.x, worldPoint3D.y);
         bool hitOne = false;
         foreach (var cloneComp in GameObject.FindObjectsOfType<IsMultiplayerClone>())
         {

@@ -18,14 +18,14 @@ using Image = UnityEngine.UI.Image;
 
 namespace Multi_bloob_adventure_idle
 {
-    [BepInPlugin("com.cannabis.multibloobidle", "Multibloob Adventure Idle", "1.3.0")]
+    [BepInPlugin("com.cannabis.multibloobidle", "Multibloob Adventure Idle", "1.3.1")]
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
-        private readonly Queue<string> messageQueue = new Queue<string>();
-        private readonly object queueLock = new object();
+        private readonly Queue<string> messageQueue = new();
+        private readonly object queueLock = new();
 
-        private readonly LocalPlayerRuntimeCache localPlayerCache = new LocalPlayerRuntimeCache();
-        private readonly SkillDataCache skillDataCache = new SkillDataCache();
+        private readonly LocalPlayerRuntimeCache localPlayerCache = new();
+        private readonly SkillDataCache skillDataCache = new();
 
         private WebSocket ws;
         private bool isConnected;
@@ -48,7 +48,7 @@ namespace Multi_bloob_adventure_idle
         private JObject lastPayload;
         public static MultiplayerPatchPlugin instance;
 
-        public static readonly Dictionary<string, PlayerData> Players = new Dictionary<string, PlayerData>();
+        public static readonly Dictionary<string, PlayerData> Players = [];
 
         private const string WebSocketUrl = "ws://172.93.111.163:42069";
         private const float PositionSendIntervalSeconds = 1f;
@@ -320,7 +320,7 @@ namespace Multi_bloob_adventure_idle
                     case "skillData":
                         existing.skillData = prop.Value.ToObject<Dictionary<string, SkillTupleDto>>()
                             ?.ToDictionary(kvp => kvp.Key, kvp => (kvp.Value.Item1, kvp.Value.Item2))
-                            ?? new Dictionary<string, (int level, int prestige)>();
+                            ?? [];
                         break;
                     case "name":
                         existing.name = prop.Value.ToObject<string>();
@@ -476,20 +476,19 @@ namespace Multi_bloob_adventure_idle
         public static List<PlayerData> FindPlayersByPartialName(string partialName)
         {
             if (string.IsNullOrWhiteSpace(partialName))
-                return new List<PlayerData>();
+                return [];
 
             var search = partialName.Trim();
 
             lock (Players)
             {
-                return Players.Values
+                return [.. Players.Values
                     .Where(p =>
                         p != null &&
                         !string.IsNullOrWhiteSpace(p.name) &&
                         p.name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
                     .OrderBy(p => p.name.Length)
-                    .ThenBy(p => p.name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                    .ThenBy(p => p.name, StringComparer.OrdinalIgnoreCase)];
             }
         }
 

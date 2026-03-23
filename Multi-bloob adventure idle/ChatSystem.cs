@@ -50,13 +50,13 @@ namespace Multi_bloob_adventure_idle
             }
         }
 
-        private readonly List<ChatUiMessage> _globalMessages = new();
-        private readonly List<ChatUiMessage> _systemMessages = new();
-        private readonly Dictionary<string, List<ChatUiMessage>> _privateMessagesBySteamId = new();
-        private readonly HashSet<string> _blockedSteamIds = new();
-        private readonly HashSet<string> _unreadPrivateSteamIds = new();
-        private readonly List<(string id, string label)> _unlockedTitles = new();
-        private readonly List<PlayerResolutionCandidate> _pendingCandidates = new();
+        private readonly List<ChatUiMessage> _globalMessages = [];
+        private readonly List<ChatUiMessage> _systemMessages = [];
+        private readonly Dictionary<string, List<ChatUiMessage>> _privateMessagesBySteamId = [];
+        private readonly HashSet<string> _blockedSteamIds = [];
+        private readonly HashSet<string> _unreadPrivateSteamIds = [];
+        private readonly List<(string id, string label)> _unlockedTitles = [];
+        private readonly List<PlayerResolutionCandidate> _pendingCandidates = [];
 
         private ConfigEntry<string> _blockedSteamIdsConfig;
         private ConfigEntry<string> _preferredTitleIdConfig;
@@ -275,7 +275,7 @@ namespace Multi_bloob_adventure_idle
 
         public IReadOnlyList<PrivateTabInfo> GetPrivateTabs()
         {
-            return _privateMessagesBySteamId
+            return [.. _privateMessagesBySteamId
                 .Select(kvp =>
                 {
                     var first = kvp.Value.LastOrDefault();
@@ -286,8 +286,7 @@ namespace Multi_bloob_adventure_idle
                         HasUnread = _unreadPrivateSteamIds.Contains(kvp.Key)
                     };
                 })
-                .OrderBy(x => x.Name)
-                .ToList();
+                .OrderBy(x => x.Name)];
         }
 
         public IReadOnlyList<(string id, string label)> GetUnlockedTitles() => _unlockedTitles;
@@ -313,8 +312,7 @@ namespace Multi_bloob_adventure_idle
         {
             _unlockedTitles.Clear();
 
-            var unlocked = msg["unlockedTitles"] as JArray;
-            if (unlocked != null)
+            if (msg["unlockedTitles"] is JArray unlocked)
             {
                 foreach (var token in unlocked)
                 {
@@ -487,12 +485,12 @@ namespace Multi_bloob_adventure_idle
         private IReadOnlyList<ChatUiMessage> GetSelectedPrivateMessages()
         {
             if (string.IsNullOrEmpty(_selectedPrivateSteamId))
-                return Array.Empty<ChatUiMessage>();
+                return [];
 
             if (_privateMessagesBySteamId.TryGetValue(_selectedPrivateSteamId, out var list))
                 return list;
 
-            return Array.Empty<ChatUiMessage>();
+            return [];
         }
 
         private static string FormatNameWithTitle(string title, string name)
@@ -508,7 +506,7 @@ namespace Multi_bloob_adventure_idle
             if (!raw.StartsWith("/"))
                 return false;
 
-            string[] split = raw.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] split = raw.Split([' '], StringSplitOptions.RemoveEmptyEntries);
             if (split.Length == 0)
                 return false;
 
@@ -587,7 +585,7 @@ namespace Multi_bloob_adventure_idle
 
             if (!_privateMessagesBySteamId.TryGetValue(otherSteamId, out var bucket))
             {
-                bucket = new List<ChatUiMessage>();
+                bucket = [];
                 _privateMessagesBySteamId[otherSteamId] = bucket;
             }
 

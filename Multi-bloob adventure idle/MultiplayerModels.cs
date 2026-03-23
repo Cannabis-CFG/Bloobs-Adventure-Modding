@@ -34,7 +34,7 @@ namespace Multi_bloob_adventure_idle
                 skillData = value?.ToDictionary(
                     kvp => kvp.Key,
                     kvp => (kvp.Value.Item1, kvp.Value.Item2))
-                    ?? new Dictionary<string, (int level, int prestige)>();
+                    ?? [];
             }
         }
 
@@ -53,8 +53,8 @@ namespace Multi_bloob_adventure_idle
         public float y;
         public float z;
 
-        public Vector3 ToVector3() => new Vector3(x, y, z);
-        public Vector2 ToVector2() => new Vector2(x, y);
+        public Vector3 ToVector3() => new(x, y, z);
+        public Vector2 ToVector2() => new(x, y);
     }
 
     public class ColourLike
@@ -64,6 +64,6 @@ namespace Multi_bloob_adventure_idle
         public float g;
         public float b;
 
-        public Color ToColor() => new Color(r, g, b, a);
+        public Color ToColor() => new(r, g, b, a);
     }
 }
