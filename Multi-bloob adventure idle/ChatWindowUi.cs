@@ -16,6 +16,7 @@ namespace Multi_bloob_adventure_idle
 
         private const float GlobalTabWidth = 110f;
         private const float PrivateTabWidth = 110f;
+        private const float ClanTabWidth = 110f;
         private const float SystemTabWidth = 110f;
         private const float TitleButtonWidth = 190f;
         private const float PinButtonWidth = 72f;
@@ -36,9 +37,11 @@ namespace Multi_bloob_adventure_idle
 
         private Button _globalTabButton;
         private Button _privateTabButton;
+        private Button _clanTabButton;
         private Button _systemTabButton;
         private TextMeshProUGUI _globalTabText;
         private TextMeshProUGUI _privateTabText;
+        private TextMeshProUGUI _clanTabText;
         private TextMeshProUGUI _systemTabText;
 
         private Button _titleButton;
@@ -251,6 +254,9 @@ namespace Multi_bloob_adventure_idle
 
             (_privateTabButton, _privateTabText) = CreateHeaderButton("PrivateTab", header, "Private", PrivateTabWidth);
             _privateTabButton.onClick.AddListener(() => _chat.SetActiveTab(ChatTab.Private));
+
+            (_clanTabButton, _clanTabText) = CreateHeaderButton("ClanTab", header, "Clan", ClanTabWidth);
+            _clanTabButton.onClick.AddListener(() => _chat.SetActiveTab(ChatTab.Clan));
 
             (_systemTabButton, _systemTabText) = CreateHeaderButton("SystemTab", header, "System", SystemTabWidth);
             _systemTabButton.onClick.AddListener(() => _chat.SetActiveTab(ChatTab.System));
@@ -470,6 +476,7 @@ namespace Multi_bloob_adventure_idle
             float fontSize = _theme.GetScaledFontSize();
             _globalTabText.fontSize = fontSize;
             _privateTabText.fontSize = fontSize;
+            _clanTabText.fontSize = fontSize;
             _systemTabText.fontSize = fontSize;
             _titleButtonText.fontSize = fontSize;
             _pinButtonText.fontSize = fontSize - 2f;
@@ -489,6 +496,7 @@ namespace Multi_bloob_adventure_idle
         {
             _globalTabText.text = _chat.BuildTabLabel(ChatTab.Global);
             _privateTabText.text = _chat.BuildTabLabel(ChatTab.Private);
+            _clanTabText.text = _chat.BuildTabLabel(ChatTab.Clan);
             _systemTabText.text = _chat.BuildTabLabel(ChatTab.System);
 
             string titleLabel = "Title: None";
@@ -505,6 +513,7 @@ namespace Multi_bloob_adventure_idle
 
             SetButtonSelected(_globalTabButton, _chat.CurrentTab == ChatTab.Global);
             SetButtonSelected(_privateTabButton, _chat.CurrentTab == ChatTab.Private);
+            SetButtonSelected(_clanTabButton, _chat.CurrentTab == ChatTab.Clan);
             SetButtonSelected(_systemTabButton, _chat.CurrentTab == ChatTab.System);
             SetButtonSelected(_titleButton, _titleMenuOpen);
             SetButtonSelected(_pinButton, _chat.IsPinned);
@@ -650,6 +659,9 @@ namespace Multi_bloob_adventure_idle
 
                 var rowImage = row.AddComponent<Image>();
                 rowImage.color = GetMessageRowColor(msg);
+
+                var rightClickHandler = row.AddComponent<ChatMessageRightClickHandler>();
+                rightClickHandler.Initialize(msg);
 
                 var rowLayout = row.AddComponent<LayoutElement>();
                 rowLayout.minHeight = 32f;
@@ -824,6 +836,7 @@ namespace Multi_bloob_adventure_idle
                 ChatMessageKind.Global => $"{prefix}{titledDisplayName}",
                 ChatMessageKind.Private when msg.IsOutgoingPrivate => $"{prefix}[To {titledOtherName}]",
                 ChatMessageKind.Private when msg.IsIncomingPrivate => $"{prefix}[From {titledDisplayName}]",
+                ChatMessageKind.Clan => $"{prefix}[Clan] {titledDisplayName}",
                 ChatMessageKind.SystemRegular => $"{prefix}[SERVER]",
                 ChatMessageKind.SystemImportant => $"{prefix}[IMPORTANT]",
                 ChatMessageKind.SystemCritical => $"{prefix}[CRITICAL]",
@@ -855,6 +868,7 @@ namespace Multi_bloob_adventure_idle
                 ChatMessageKind.SystemCritical => _theme.GetMessageCriticalBackgroundColor(),
                 ChatMessageKind.Error => _theme.GetMessageErrorBackgroundColor(),
                 ChatMessageKind.Private => _theme.GetMessagePrivateBackgroundColor(),
+                ChatMessageKind.Clan => _theme.GetMessageClanBackgroundColor(),
                 _ => _theme.GetMessageGlobalBackgroundColor()
             };
         }
@@ -913,7 +927,7 @@ namespace Multi_bloob_adventure_idle
 
         private float GetMinimumWindowWidth()
         {
-            return WindowSidePadding + GlobalTabWidth + HeaderSpacing + PrivateTabWidth + HeaderSpacing + SystemTabWidth + HeaderSpacing + TitleButtonWidth + HeaderSpacing + PinButtonWidth + WindowSidePadding;
+            return WindowSidePadding + GlobalTabWidth + HeaderSpacing + PrivateTabWidth + HeaderSpacing + ClanTabWidth + HeaderSpacing + SystemTabWidth + HeaderSpacing + TitleButtonWidth + HeaderSpacing + PinButtonWidth + WindowSidePadding;
         }
 
         private static Rect ClampToScreen(Rect rect)
@@ -1010,6 +1024,47 @@ namespace Multi_bloob_adventure_idle
             rt.anchorMax = Vector2.one;
             rt.offsetMin = offsetMin ?? Vector2.zero;
             rt.offsetMax = offsetMax ?? Vector2.zero;
+        }
+    }
+
+    public sealed class ChatMessageRightClickHandler : MonoBehaviour, IPointerClickHandler
+    {
+        private ChatUiMessage _message;
+
+        public void Initialize(ChatUiMessage message)
+        {
+            _message = message;
+        }
+
+        public void OnPointerClick(PointerEventData eventData)
+        {
+            if (eventData.button != PointerEventData.InputButton.Right || _message == null || MultiplayerContextMenu.Instance == null)
+                return;
+
+            string targetSteamId = null;
+            string targetName = null;
+
+            switch (_message.Kind)
+            {
+                case ChatMessageKind.Global:
+                case ChatMessageKind.Clan:
+                    targetSteamId = _message.FromSteamId;
+                    targetName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(targetSteamId, _message.DisplayName);
+                    break;
+                case ChatMessageKind.Private when _message.IsIncomingPrivate:
+                    targetSteamId = _message.FromSteamId;
+                    targetName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(targetSteamId, _message.DisplayName);
+                    break;
+                case ChatMessageKind.Private when _message.IsOutgoingPrivate:
+                    targetSteamId = _message.ToSteamId;
+                    targetName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(targetSteamId, _message.OtherPartyName);
+                    break;
+            }
+
+            if (string.IsNullOrWhiteSpace(targetSteamId))
+                return;
+
+            MultiplayerContextMenu.Instance.ShowPlayerActions(targetSteamId, targetName, eventData.position);
         }
     }
 

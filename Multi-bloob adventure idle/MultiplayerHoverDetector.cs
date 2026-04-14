@@ -1,8 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.Windows;
 using Input = UnityEngine.Input;
 
 namespace Multi_bloob_adventure_idle;
@@ -30,37 +28,61 @@ public class MultiplayerHoverDetector : MonoBehaviour
         if (!MultiplayerPatchPlugin.isReady || !cam || !MultiplayerPatchPlugin.enableLevelPanel.Value || MultiplayerContextMenu.IsContextMenuOpen)
             return;
 
-        Vector3 worldPoint3D = cam.ScreenToWorldPoint(Input.mousePosition);
-        Vector2 worldPoint2D = new(worldPoint3D.x, worldPoint3D.y);
-        bool hitOne = false;
-        foreach (var cloneComp in GameObject.FindObjectsOfType<IsMultiplayerClone>())
+        var hovered = GetPlayersAtScreenPosition(Input.mousePosition);
+        if (hovered.Count > 0)
         {
-            var sr = cloneComp.GetComponent<SpriteRenderer>();
-            if (sr && sr.bounds.Contains(new Vector3(worldPoint2D.x, worldPoint2D.y, sr.bounds.center.z)))
-            {
-                
-                string cloneName = cloneComp.name.Replace("BloobClone_", "");
-                if (MultiplayerPatchPlugin.Players.TryGetValue(cloneName, out var playerData))
-                {
-                    string playerName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(cloneName);
-                    string info = BuildHoverInfo(playerName, playerData);
-                    HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);
-                    hitOne = true;
-                }
-                break;
-            }
+            var playerData = hovered[0];
+            string playerName = MultiplayerPatchPlugin.GetPlayerNameFromSteamId(playerData.steamId);
+            string info = BuildHoverInfo(playerName, playerData);
+            HoverUIManager.Instance.ShowInfo(info, Input.mousePosition);
+            return;
         }
 
-        if (!hitOne)
+        HoverUIManager.Instance.HideInfo();
+    }
+
+    public static List<PlayerData> GetPlayersAtScreenPosition(Vector3 screenPosition)
+    {
+        var results = new List<(PlayerData data, float distance, int sortingOrder)>();
+        if (!cam)
+            return [];
+
+        Vector3 worldPoint3D = cam.ScreenToWorldPoint(screenPosition);
+        Vector2 worldPoint2D = new(worldPoint3D.x, worldPoint3D.y);
+
+        foreach (var clone in CloneManager.GetAllClones())
         {
-            HoverUIManager.Instance.HideInfo();
+            var cloneObject = clone?.GameObject;
+            if (cloneObject == null)
+                continue;
+
+            var marker = cloneObject.GetComponent<IsMultiplayerClone>();
+            var sr = cloneObject.GetComponent<SpriteRenderer>();
+            if (marker == null || sr == null)
+                continue;
+
+            var bounds = sr.bounds;
+            bounds.Expand(0.15f);
+            if (!bounds.Contains(new Vector3(worldPoint2D.x, worldPoint2D.y, bounds.center.z)))
+                continue;
+
+            if (!MultiplayerPatchPlugin.Players.TryGetValue(marker.steamId, out var playerData) || playerData == null)
+                continue;
+
+            float distance = Vector2.Distance(worldPoint2D, new Vector2(bounds.center.x, bounds.center.y));
+            results.Add((playerData, distance, sr.sortingOrder));
         }
+
+        return [.. results
+            .OrderByDescending(x => x.sortingOrder)
+            .ThenBy(x => x.distance)
+            .Select(x => x.data)];
     }
 
     public static string BuildHoverInfo(string playerName, PlayerData data)
     {
         var columnWidth = 20;
-        var sorted = data.skillData
+        var sorted = (data.skillData ?? [])
             .Where(kv => kv.Value.level >= 0)
             .OrderByDescending(kv => kv.Value.prestige)
             .ThenByDescending(kv => kv.Value.level)
@@ -91,7 +113,13 @@ public class MultiplayerHoverDetector : MonoBehaviour
                 lines.Add(sorted[i]);
             }
         }
-        lines.Insert(0, $"<b>{playerName}</b>");
+
+        var clanPrefix = string.IsNullOrWhiteSpace(data?.clanTag)
+            ? string.Empty
+            : $"[{data.clanTag}] ";
+        var turboSuffix = data != null && data.isTurboSave ? " <color=#00FEEE>[Turbo]</color>" : string.Empty;
+
+        lines.Insert(0, $"<b>{clanPrefix}{playerName}</b>{turboSuffix}");
         return string.Join("\n", lines);
     }
 }

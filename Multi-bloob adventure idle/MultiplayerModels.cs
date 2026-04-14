@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -15,6 +15,12 @@ namespace Multi_bloob_adventure_idle
         public int activeHatIndex = -1;
         public int activeWingIndex = -1;
         public ColourLike bloobColour;
+        public string clanId;
+        public string clanName;
+        public string clanTag;
+        public Dictionary<string, double> skillExperienceData = [];
+        public Dictionary<string, long> bossKillData = [];
+        public bool isTurboSave;
 
         // Tuple storage is local. DTO storage is wire-safe.
         [JsonIgnore]
@@ -45,6 +51,85 @@ namespace Multi_bloob_adventure_idle
     {
         public int Item1;
         public int Item2;
+    }
+
+    public class ClanStateDto
+    {
+        public string clanId;
+        public string name;
+        public string tag;
+        public string ownerSteamId;
+        public string description;
+        public string viewerRole;
+        public bool viewerIsMember;
+        public bool viewerCanManageMembers;
+        public bool viewerCanManagePermissions;
+        public bool viewerCanManageUpgrades;
+        public bool isPublicProfile;
+        public Dictionary<string, ClanSkillDto> skills;
+        public List<ClanMemberDto> members;
+        public Dictionary<string, ClanContributionDto> contributionsByMember;
+        public Dictionary<string, long> totalBossKillsByBoss;
+        public Dictionary<string, Dictionary<string, bool>> rolePermissions;
+        public List<ClanUpgradeDto> upgrades;
+        public ClanAggregateStatsDto aggregateStats;
+    }
+
+    public class ClanSkillDto
+    {
+        public int level;
+        public int prestige;
+        public double xp;
+        public double totalExperience;
+        public double nextLevelRequirement;
+        public int nextPrestigeLevel;
+    }
+
+    public class ClanMemberDto
+    {
+        public string steamId;
+        public string name;
+        public string role;
+        public string joinedAtUtc;
+        public bool isOnline;
+    }
+
+    public class ClanContributionDto
+    {
+        public string steamId;
+        public string name;
+        public double totalExperience;
+        public int totalLevelsGained;
+        public int totalPrestigeGained;
+        public long totalBossKills;
+        public Dictionary<string, long> bossKills;
+    }
+
+    public class ClanUpgradeDto
+    {
+        public string id;
+        public string name;
+        public string description;
+        public string bonusText;
+        public bool unlocked;
+        public bool purchased;
+        public bool active;
+        public string purchasedAtUtc;
+        public List<string> requirementText;
+        public int currentTier;
+        public int nextTier;
+        public int maxTier;
+        public bool canPurchaseNextTier;
+        public string nextTierBonusText;
+    }
+
+    public class ClanAggregateStatsDto
+    {
+        public double totalExperience;
+        public int totalLevelsGained;
+        public int totalPrestigeGained;
+        public long totalBossKills;
+        public int memberCount;
     }
 
     public class Vector3Like
