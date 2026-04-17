@@ -65,6 +65,7 @@ namespace Multi_bloob_adventure_idle
         public bool viewerCanManageMembers;
         public bool viewerCanManagePermissions;
         public bool viewerCanManageUpgrades;
+        public bool viewerCanPrestigeSkills;
         public bool isPublicProfile;
         public Dictionary<string, ClanSkillDto> skills;
         public List<ClanMemberDto> members;
@@ -83,6 +84,8 @@ namespace Multi_bloob_adventure_idle
         public double totalExperience;
         public double nextLevelRequirement;
         public int nextPrestigeLevel;
+        public int levelCap;
+        public bool canPrestige;
     }
 
     public class ClanMemberDto
@@ -119,6 +122,7 @@ namespace Multi_bloob_adventure_idle
         public int currentTier;
         public int nextTier;
         public int maxTier;
+        public bool isInfinite;
         public bool canPurchaseNextTier;
         public string nextTierBonusText;
     }

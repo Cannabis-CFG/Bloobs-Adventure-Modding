@@ -36,8 +36,9 @@
     <Reference Include="0Harmony">
       <HintPath>..\References\0Harmony.dll</HintPath>
     </Reference>
-    <Reference Include="Assembly-CSharp">
-      <HintPath>..\References\Assembly-CSharp.dll</HintPath>
+    <Reference Include="Assembly-CSharp, Version=0.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>H:\SteamLibrary\steamapps\common\Bloobs Adventure Idle\Bloobs Adventure Idle_Data\Managed\Assembly-CSharp.dll</HintPath>
     </Reference>
     <Reference Include="AstarPathfindingProject">
       <HintPath>..\References\AstarPathfindingProject.dll</HintPath>
@@ -175,6 +176,9 @@
   <ItemGroup>
     <None Include="app.config" />
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="server.js" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

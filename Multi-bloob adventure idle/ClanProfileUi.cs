@@ -25,7 +25,8 @@ namespace Multi_bloob_adventure_idle
             "manageRoles",
             "managePermissions",
             "purchaseUpgrades",
-            "toggleUpgrades"
+            "toggleUpgrades",
+            "prestigeSkills"
         ];
 
         private static readonly string[] EditableRoles =
@@ -185,10 +186,15 @@ namespace Multi_bloob_adventure_idle
                 .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
             {
                 var dto = skill.Value ?? new ClanSkillDto();
-                if (dto.prestige > 0)
-                    lines.Add($" - {skill.Key}: Level {dto.level} (Prestige {dto.prestige}) | XP {Math.Round(dto.xp, 2)} / {Math.Round(dto.nextLevelRequirement, 2)} | Total XP {Math.Round(dto.totalExperience, 2)} | Next Prestige {dto.nextPrestigeLevel}");
-                else
-                    lines.Add($" - {skill.Key}: Level {dto.level} | XP {Math.Round(dto.xp, 2)} / {Math.Round(dto.nextLevelRequirement, 2)} | Total XP {Math.Round(dto.totalExperience, 2)} | Next Prestige {dto.nextPrestigeLevel}");
+                string prestigeText = dto.prestige > 0 ? $" (Prestige {dto.prestige})" : string.Empty;
+                string capText = dto.levelCap > 0 ? $" | Cap {dto.levelCap}" : string.Empty;
+                string nextText = dto.canPrestige
+                    ? " | Prestige Ready"
+                    : $" | Next Prestige {dto.nextPrestigeLevel}";
+                string xpText = dto.nextLevelRequirement > 0d
+                    ? $"XP {Math.Round(dto.xp, 2)} / {Math.Round(dto.nextLevelRequirement, 2)}"
+                    : $"Stored XP {Math.Round(dto.xp, 2)}";
+                lines.Add($" - {skill.Key}: Level {dto.level}{prestigeText}{capText} | {xpText} | Total XP {Math.Round(dto.totalExperience, 2)}{nextText}");
             }
 
             lines.Add(string.Empty);
@@ -238,17 +244,28 @@ namespace Multi_bloob_adventure_idle
             var lines = new List<string> { "Clan Upgrades:" };
             foreach (var upgrade in (clan.upgrades ?? new List<ClanUpgradeDto>()).OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase))
             {
-                var status = upgrade.currentTier >= upgrade.maxTier
-                    ? upgrade.active ? "Max Tier / Active" : "Max Tier / Inactive"
-                    : upgrade.purchased
-                        ? upgrade.active ? $"Tier {upgrade.currentTier} / Active" : $"Tier {upgrade.currentTier} / Inactive"
+                string status;
+                if (upgrade.isInfinite)
+                {
+                    status = upgrade.purchased
+                        ? upgrade.active ? $"Tier {upgrade.currentTier} / Infinite / Active" : $"Tier {upgrade.currentTier} / Infinite / Inactive"
                         : upgrade.unlocked ? $"Tier {upgrade.nextTier} Unlocked" : $"Tier {upgrade.nextTier} Locked";
+                }
+                else
+                {
+                    status = upgrade.currentTier >= upgrade.maxTier
+                        ? upgrade.active ? "Max Tier / Active" : "Max Tier / Inactive"
+                        : upgrade.purchased
+                            ? upgrade.active ? $"Tier {upgrade.currentTier} / Active" : $"Tier {upgrade.currentTier} / Inactive"
+                            : upgrade.unlocked ? $"Tier {upgrade.nextTier} Unlocked" : $"Tier {upgrade.nextTier} Locked";
+                }
+
                 lines.Add($" - {upgrade.name}: {status}");
                 if (!string.IsNullOrWhiteSpace(upgrade.description))
                     lines.Add($"   {upgrade.description}");
                 if (!string.IsNullOrWhiteSpace(upgrade.bonusText))
                     lines.Add($"   Current Bonus: {upgrade.bonusText}");
-                if (!string.IsNullOrWhiteSpace(upgrade.nextTierBonusText) && upgrade.currentTier < upgrade.maxTier)
+                if (!string.IsNullOrWhiteSpace(upgrade.nextTierBonusText))
                     lines.Add($"   Next Tier Bonus: {upgrade.nextTierBonusText}");
                 foreach (var requirement in upgrade.requirementText ?? new List<string>())
                     lines.Add($"   Requirement: {requirement}");
@@ -313,6 +330,9 @@ namespace Multi_bloob_adventure_idle
 
             switch (_activeTab)
             {
+                case ClanProfileTab.Overview:
+                    BuildOverviewActions(clan);
+                    break;
                 case ClanProfileTab.Members:
                     BuildMemberActions(clan);
                     break;
@@ -323,6 +343,17 @@ namespace Multi_bloob_adventure_idle
                     BuildPermissionActions(clan);
                     break;
             }
+        }
+
+        private void BuildOverviewActions(ClanStateDto clan)
+        {
+            if (!clan.viewerIsMember || !clan.viewerCanPrestigeSkills)
+                return;
+
+            _memberInput = CreateInputField(_actionRoot, "Clan skill name");
+
+            var row = CreateActionRow();
+            CreateActionButton(row, "Prestige Skill", () => SendClanMemberAction("prestigeSkill", new { skillName = SafeInputValue() }));
         }
 
         private void BuildMemberActions(ClanStateDto clan)
@@ -491,6 +522,7 @@ namespace Multi_bloob_adventure_idle
                 "managePermissions" => "Manage Permissions",
                 "purchaseUpgrades" => "Purchase Upgrades",
                 "toggleUpgrades" => "Toggle Upgrades",
+                "prestigeSkills" => "Prestige Skills",
                 _ => permission
             };
         }

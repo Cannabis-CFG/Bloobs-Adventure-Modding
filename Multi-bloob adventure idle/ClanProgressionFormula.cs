@@ -9,17 +9,27 @@ namespace Multi_bloob_adventure_idle
         private const double Post100C = 1264.06507;
         private const double Post100D = 1223650.89;
 
-        public static int GetPrestigeForLevel(int level)
+        public static int GetLevelCapForPrestige(int prestige)
         {
-            if (level <= 0)
-                return 0;
-
-            return level / 100;
+            return Math.Max(100, (Math.Max(0, prestige) + 1) * 100);
         }
 
-        public static int GetNextPrestigeLevel(int level)
+        public static int GetPrestigeForLevelCap(int levelCap)
         {
-            return (GetPrestigeForLevel(level) + 1) * 100;
+            if (levelCap <= 100)
+                return 0;
+
+            return Math.Max(0, (levelCap / 100) - 1);
+        }
+
+        public static int GetNextPrestigeLevel(int prestige)
+        {
+            return GetLevelCapForPrestige(prestige);
+        }
+
+        public static bool CanPrestige(int level, int levelCap)
+        {
+            return Math.Max(1, level) >= Math.Max(100, levelCap);
         }
 
         public static double GetXpForNextLevel(int currentLevel)
