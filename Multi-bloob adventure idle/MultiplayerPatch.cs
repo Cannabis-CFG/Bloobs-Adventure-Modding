@@ -404,6 +404,8 @@ namespace Multi_bloob_adventure_idle
             PlayerProfileUi.Create();
             ClanProfileUi.Create();
             ModUpdateManager.Create(Config, Info.Metadata.Version.ToString(), Info.Location);
+            PlayerDataManager playerDataManager = GameObject.Find("PlayerDataManager")?.GetComponent<PlayerDataManager>();
+            playerDataManager?.SetModded(true);
 
             TryResolveLocalPlayer(forceRefresh: true);
             RefreshSkillSnapshot(forceDirty: true);
