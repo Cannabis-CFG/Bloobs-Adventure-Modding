@@ -45,6 +45,8 @@ namespace Multi_bloob_adventure_idle
         public readonly ConfigEntry<float> MessageGlobalBackgroundOpacity = config.Bind("Chat Theme", "Global Message Background Opacity", 0.04f, "Global message row opacity.");
         public readonly ConfigEntry<string> MessagePrivateBackgroundColor = config.Bind("Chat Theme", "Private Message Background Color", "#142452", "Private message row color.");
         public readonly ConfigEntry<float> MessagePrivateBackgroundOpacity = config.Bind("Chat Theme", "Private Message Background Opacity", 0.38f, "Private message row opacity.");
+        public readonly ConfigEntry<string> MessageClanBackgroundColor = config.Bind("Chat Theme", "Clan Message Background Color", "#13422D", "Clan message row color.");
+        public readonly ConfigEntry<float> MessageClanBackgroundOpacity = config.Bind("Chat Theme", "Clan Message Background Opacity", 0.38f, "Clan message row opacity.");
         public readonly ConfigEntry<string> MessageImportantBackgroundColor = config.Bind("Chat Theme", "Important Message Background Color", "#614703", "Important message row color.");
         public readonly ConfigEntry<float> MessageImportantBackgroundOpacity = config.Bind("Chat Theme", "Important Message Background Opacity", 0.55f, "Important message row opacity.");
         public readonly ConfigEntry<string> MessageCriticalBackgroundColor = config.Bind("Chat Theme", "Critical Message Background Color", "#6B1414", "Critical message row color.");
@@ -114,6 +116,7 @@ namespace Multi_bloob_adventure_idle
 
         public Color GetMessageGlobalBackgroundColor() => ParseColor(MessageGlobalBackgroundColor.Value, Color.white, Mathf.Clamp01(MessageGlobalBackgroundOpacity.Value));
         public Color GetMessagePrivateBackgroundColor() => ParseColor(MessagePrivateBackgroundColor.Value, new Color(0.08f, 0.14f, 0.32f), Mathf.Clamp01(MessagePrivateBackgroundOpacity.Value));
+        public Color GetMessageClanBackgroundColor() => ParseColor(MessageClanBackgroundColor.Value, new Color(0.07f, 0.26f, 0.18f), Mathf.Clamp01(MessageClanBackgroundOpacity.Value));
         public Color GetMessageImportantBackgroundColor() => ParseColor(MessageImportantBackgroundColor.Value, new Color(0.38f, 0.28f, 0.02f), Mathf.Clamp01(MessageImportantBackgroundOpacity.Value));
         public Color GetMessageCriticalBackgroundColor() => ParseColor(MessageCriticalBackgroundColor.Value, new Color(0.42f, 0.08f, 0.08f), Mathf.Clamp01(MessageCriticalBackgroundOpacity.Value));
         public Color GetMessageErrorBackgroundColor() => ParseColor(MessageErrorBackgroundColor.Value, new Color(0.35f, 0.1f, 0.1f), Mathf.Clamp01(MessageErrorBackgroundOpacity.Value));

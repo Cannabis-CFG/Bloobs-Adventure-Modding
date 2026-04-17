@@ -18,7 +18,7 @@ using Image = UnityEngine.UI.Image;
 
 namespace Multi_bloob_adventure_idle
 {
-    [BepInPlugin("com.cannabis.multibloobidle", "Multibloob Adventure Idle", "1.3.1")]
+    [BepInPlugin("com.cannabis.multibloobidle", "Multibloob Adventure Idle", "1.4.0")]
     public class MultiplayerPatchPlugin : BaseUnityPlugin
     {
         private readonly Queue<string> messageQueue = new();
@@ -26,6 +26,7 @@ namespace Multi_bloob_adventure_idle
 
         private readonly LocalPlayerRuntimeCache localPlayerCache = new();
         private readonly SkillDataCache skillDataCache = new();
+        private readonly BossKillCache bossKillCache = new();
 
         private WebSocket ws;
         private bool isConnected;
@@ -33,8 +34,15 @@ namespace Multi_bloob_adventure_idle
         private Coroutine connectionMonitorCoroutine;
 
         private Coroutine positionCoroutine;
+        private Coroutine presenceCoroutine;
         private Coroutine ghostPlayerCoroutine;
         private Coroutine skillRefreshCoroutine;
+        private Coroutine clanSkillBatchCoroutine;
+
+        private readonly Dictionary<string, double> pendingClanSkillXpByBucket = new(StringComparer.Ordinal);
+        private string pendingClanSkillXpClanId = string.Empty;
+        private readonly Dictionary<string, long> pendingClanBossKillsByBoss = new(StringComparer.OrdinalIgnoreCase);
+        private string pendingClanBossKillClanId = string.Empty;
 
         public static bool isReady;
         private bool nameTagCreated;
@@ -44,6 +52,7 @@ namespace Multi_bloob_adventure_idle
         private string steamIdCache;
         private int cachedActiveHatIndex = -1;
         private int cachedActiveWingIndex = -1;
+        private bool cachedIsTurboSave;
         private bool atMm;
         private JObject lastPayload;
         public static MultiplayerPatchPlugin instance;
@@ -51,9 +60,11 @@ namespace Multi_bloob_adventure_idle
         public static readonly Dictionary<string, PlayerData> Players = [];
 
         private const string WebSocketUrl = "ws://172.93.111.163:42069";
-        private const float PositionSendIntervalSeconds = 1f;
+        private const float PositionSendIntervalSeconds = 0.2f;
+        private const float PresenceSendIntervalSeconds = 1f;
         private const float GhostRefreshIntervalSeconds = 1f;
-        private const float SkillRefreshIntervalSeconds = 30f;
+        private const float SkillRefreshIntervalSeconds = 5f;
+        private const float ClanSkillBatchFlushIntervalSeconds = 30f;
 
         private void Awake()
         {
@@ -83,6 +94,8 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(CharacterMovementHandleManualInputPatch));
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeHideHatPatch));
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeHideWingsPatch));
+            Harmony.CreateAndPatchAll(typeof(HomeSteadingSkillAddXpClanPatch));
+            Harmony.CreateAndPatchAll(typeof(TrackerBossDeathPatch));
         }
 
         private void InitializeWebSocket()
@@ -154,6 +167,7 @@ namespace Multi_bloob_adventure_idle
         {
             try
             {
+                FlushPendingClanSkillXpBatch();
                 ws?.Close();
             }
             catch
@@ -239,6 +253,14 @@ namespace Multi_bloob_adventure_idle
                             case "titleState":
                                 ChatSystem.Instance?.ReceiveTitleState(msg);
                                 break;
+
+                            case "clanState":
+                                ChatSystem.Instance?.ReceiveClanState(msg);
+                                break;
+
+                            case "clanProfile":
+                                ChatSystem.Instance?.ReceiveClanProfile(msg);
+                                break;
                         }
                     }
                 }
@@ -322,6 +344,9 @@ namespace Multi_bloob_adventure_idle
                             ?.ToDictionary(kvp => kvp.Key, kvp => (kvp.Value.Item1, kvp.Value.Item2))
                             ?? [];
                         break;
+                    case "skillExperienceData":
+                        existing.skillExperienceData = prop.Value.ToObject<Dictionary<string, double>>() ?? [];
+                        break;
                     case "name":
                         existing.name = prop.Value.ToObject<string>();
                         break;
@@ -333,6 +358,21 @@ namespace Multi_bloob_adventure_idle
                         break;
                     case "activeWingIndex":
                         existing.activeWingIndex = prop.Value.ToObject<int>();
+                        break;
+                    case "clanId":
+                        existing.clanId = prop.Value.ToObject<string>();
+                        break;
+                    case "clanName":
+                        existing.clanName = prop.Value.ToObject<string>();
+                        break;
+                    case "clanTag":
+                        existing.clanTag = prop.Value.ToObject<string>();
+                        break;
+                    case "isTurboSave":
+                        existing.isTurboSave = prop.Value.ToObject<bool>();
+                        break;
+                    case "bossKillData":
+                        existing.bossKillData = prop.Value.ToObject<Dictionary<string, long>>() ?? [];
                         break;
                 }
             }
@@ -357,25 +397,30 @@ namespace Multi_bloob_adventure_idle
             isReady = true;
             localPlayerCache.Clear();
             CloneCustomizationCache.RefreshFromLocalPlayer();
+            ChatSystem.Create(Config);
             new GameObject("HoverUIManager").AddComponent<HoverUIManager>();
             new GameObject("HoverDetector").AddComponent<MultiplayerHoverDetector>();
-            ChatSystem.Create(Config);
+            new GameObject("MultiplayerContextMenu").AddComponent<MultiplayerContextMenu>();
+            PlayerProfileUi.Create();
+            ClanProfileUi.Create();
+            ModUpdateManager.Create(Config, Info.Metadata.Version.ToString(), Info.Location);
 
             TryResolveLocalPlayer(forceRefresh: true);
             RefreshSkillSnapshot(forceDirty: true);
             RefreshLocalCustomizationCache();
+            RefreshLocalStateFlags();
+            ForceSendFullState();
 
             ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
             skillRefreshCoroutine ??= StartCoroutine(RefreshSkillDataEnumerator());
             positionCoroutine ??= StartCoroutine(GetPositionEnumerator());
+            presenceCoroutine ??= StartCoroutine(SendPresenceEnumerator());
+            clanSkillBatchCoroutine ??= StartCoroutine(FlushClanSkillXpBatchEnumerator());
 
             AddsettingOptions();
 
-            if (atMm && lastPayload != null && ws != null && ws.IsAlive)
-            {
-                ws.Send(lastPayload.ToString(Formatting.None));
+            if (atMm)
                 atMm = false;
-            }
         }
 
         private bool TryResolveLocalPlayer(bool forceRefresh = false)
@@ -393,6 +438,43 @@ namespace Multi_bloob_adventure_idle
 
             if (forceDirty)
                 skillDataCache.MarkDirty();
+        }
+
+        private void RefreshLocalStateFlags()
+        {
+            cachedIsTurboSave = ResolveTurboSaveFlag();
+        }
+
+        private bool ResolveTurboSaveFlag()
+        {
+            var gameCanvas = GameObject.Find("GameCanvas");
+            if (gameCanvas == null)
+                return false;
+
+            var turboModeText = gameCanvas
+                .GetComponentsInChildren<Transform>(true)
+                .FirstOrDefault(t => t != null && string.Equals(t.name, "Turbo Mode Text", StringComparison.Ordinal));
+
+            if (turboModeText == null)
+                return false;
+
+            if (!turboModeText.gameObject.activeSelf || !turboModeText.gameObject.activeInHierarchy)
+                return false;
+
+            var behaviour = turboModeText.GetComponent<Behaviour>();
+            if (behaviour != null)
+                return behaviour.isActiveAndEnabled;
+
+            return true;
+        }
+
+        public void SetLocalTurboSaveState(bool isTurboSave)
+        {
+            if (cachedIsTurboSave == isTurboSave)
+                return;
+
+            cachedIsTurboSave = isTurboSave;
+            SendStateDelta(BuildPresencePayload(), force: true);
         }
 
         public Dictionary<string, (int level, int prestige)> GetCachedSkillData()
@@ -524,6 +606,9 @@ namespace Multi_bloob_adventure_idle
                 }
 
                 RefreshSkillSnapshot(forceDirty: false);
+                if (skillDataCache.IsDirty || lastPayload == null)
+                    SendStateDelta(BuildSkillPayload(), force: skillDataCache.IsDirty);
+
                 yield return new WaitForSecondsRealtime(SkillRefreshIntervalSeconds);
             }
         }
@@ -588,77 +673,280 @@ namespace Multi_bloob_adventure_idle
                     continue;
                 }
 
-                var payload = BuildPlayerPayload();
-                var newPayload = JObject.FromObject(payload);
-
-                var diffPayload = new JObject
-                {
-                    ["name"] = newPayload["name"],
-                    ["steamId"] = newPayload["steamId"]
-                };
-
-                foreach (var property in newPayload.Properties())
-                {
-                    if (property.Name == "name" || property.Name == "steamId")
-                        continue;
-
-                    if (property.Name == "skillData")
-                    {
-                        if (lastPayload == null || skillDataCache.IsDirty)
-                            diffPayload[property.Name] = property.Value;
-
-                        continue;
-                    }
-
-                    if (lastPayload == null || !JToken.DeepEquals(property.Value, lastPayload[property.Name]))
-                        diffPayload[property.Name] = property.Value;
-                }
-
-                if (diffPayload.Properties().Count() > 2)
-                {
-                    var jsonPayload = diffPayload.ToString(Formatting.None);
-                    if (ws != null && ws.IsAlive)
-                        ws.Send(jsonPayload);
-
-                    lastPayload = newPayload;
-                    skillDataCache.ClearDirty();
-                }
-
+                SendStateDelta(BuildMovementPayload());
                 yield return new WaitForSecondsRealtime(PositionSendIntervalSeconds);
             }
         }
 
-        private object BuildPlayerPayload()
+        private IEnumerator SendPresenceEnumerator()
         {
-            var position = localPlayerCache.PlayerTransform.position;
+            while (true)
+            {
+                if (!isReady)
+                {
+                    yield return new WaitForSecondsRealtime(15f);
+                    continue;
+                }
+
+                if (!TryResolveLocalPlayer())
+                {
+                    yield return new WaitForSecondsRealtime(PresenceSendIntervalSeconds);
+                    continue;
+                }
+
+                RefreshLocalCustomizationCache();
+                RefreshLocalStateFlags();
+                SendStateDelta(BuildPresencePayload());
+                yield return new WaitForSecondsRealtime(PresenceSendIntervalSeconds);
+            }
+        }
+
+        private IEnumerator FlushClanSkillXpBatchEnumerator()
+        {
+            while (true)
+            {
+                if (!isReady)
+                {
+                    yield return new WaitForSecondsRealtime(15f);
+                    continue;
+                }
+
+                yield return new WaitForSecondsRealtime(ClanSkillBatchFlushIntervalSeconds);
+                FlushPendingClanSkillXpBatch();
+            }
+        }
+
+        private void FlushPendingClanSkillXpBatch(bool discardIfClanChanged = true)
+        {
+            var currentClanId = ChatSystem.Instance?.GetCurrentClanState()?.clanId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(currentClanId))
+            {
+                pendingClanSkillXpByBucket.Clear();
+                pendingClanSkillXpClanId = string.Empty;
+                pendingClanBossKillsByBoss.Clear();
+                pendingClanBossKillClanId = string.Empty;
+                return;
+            }
+
+            if (discardIfClanChanged)
+            {
+                if (!string.IsNullOrWhiteSpace(pendingClanSkillXpClanId) && !string.Equals(pendingClanSkillXpClanId, currentClanId, StringComparison.Ordinal))
+                {
+                    pendingClanSkillXpByBucket.Clear();
+                    pendingClanSkillXpClanId = string.Empty;
+                }
+
+                if (!string.IsNullOrWhiteSpace(pendingClanBossKillClanId) && !string.Equals(pendingClanBossKillClanId, currentClanId, StringComparison.Ordinal))
+                {
+                    pendingClanBossKillsByBoss.Clear();
+                    pendingClanBossKillClanId = string.Empty;
+                }
+            }
+
+            if (ws == null || !isConnected || !ws.IsAlive || !SteamClient.IsValid)
+                return;
+
+            if (pendingClanSkillXpByBucket.Count > 0)
+            {
+                var entries = new JArray();
+                foreach (var kvp in pendingClanSkillXpByBucket)
+                {
+                    if (kvp.Value <= 0d || double.IsNaN(kvp.Value) || double.IsInfinity(kvp.Value))
+                        continue;
+
+                    var separatorIndex = kvp.Key.LastIndexOf("::", StringComparison.Ordinal);
+                    if (separatorIndex <= 0)
+                        continue;
+
+                    var skillKey = kvp.Key.Substring(0, separatorIndex);
+                    var modeKey = kvp.Key.Substring(separatorIndex + 2);
+                    var isTurboMode = string.Equals(modeKey, "turbo", StringComparison.Ordinal);
+
+                    entries.Add(new JObject
+                    {
+                        ["skillKey"] = skillKey,
+                        ["rawSkillXpGained"] = Math.Round(kvp.Value, 4, MidpointRounding.AwayFromZero),
+                        ["isTurboMode"] = isTurboMode
+                    });
+                }
+
+                if (entries.Count > 0)
+                {
+                    var payload = new JObject
+                    {
+                        ["type"] = "clanSkillXpBatchAction",
+                        ["steamId"] = SteamClient.SteamId.ToString(),
+                        ["name"] = SteamClient.Name,
+                        ["entries"] = entries,
+                        ["timestampUtc"] = DateTime.UtcNow.ToString("O")
+                    };
+
+                    ws.Send(payload.ToString(Formatting.None));
+                }
+
+                pendingClanSkillXpByBucket.Clear();
+                pendingClanSkillXpClanId = currentClanId;
+            }
+
+            if (pendingClanBossKillsByBoss.Count > 0)
+            {
+                var entries = new JArray();
+                foreach (var kvp in pendingClanBossKillsByBoss)
+                {
+                    if (string.IsNullOrWhiteSpace(kvp.Key) || kvp.Value <= 0)
+                        continue;
+
+                    entries.Add(new JObject
+                    {
+                        ["bossId"] = kvp.Key,
+                        ["count"] = kvp.Value
+                    });
+                }
+
+                if (entries.Count > 0)
+                {
+                    var payload = new JObject
+                    {
+                        ["type"] = "clanBossKillBatchAction",
+                        ["steamId"] = SteamClient.SteamId.ToString(),
+                        ["name"] = SteamClient.Name,
+                        ["entries"] = entries,
+                        ["timestampUtc"] = DateTime.UtcNow.ToString("O")
+                    };
+
+                    ws.Send(payload.ToString(Formatting.None));
+                }
+
+                pendingClanBossKillsByBoss.Clear();
+                pendingClanBossKillClanId = currentClanId;
+            }
+        }
+
+        private JObject BuildMovementPayload()
+        {
+            var position = localPlayerCache.PlayerTransform != null ? localPlayerCache.PlayerTransform.position : Vector3.zero;
+            return new JObject
+            {
+                ["currentPosition"] = JObject.FromObject(new Vector3Like
+                {
+                    x = (float)Math.Round(position.x, 2),
+                    y = (float)Math.Round(position.y, 2),
+                    z = (float)Math.Round(position.z, 2)
+                }),
+                ["runSpeed"] = localPlayerCache.GetRunSpeed()
+            };
+        }
+
+        private JObject BuildPresencePayload()
+        {
             var color = localPlayerCache.PlayerSpriteRenderer != null
                 ? localPlayerCache.PlayerSpriteRenderer.color
                 : Color.white;
 
-            return new
+            return new JObject
             {
-                name = SteamClient.Name,
-                steamId = SteamClient.SteamId.ToString(),
-                currentPosition = new
-                {
-                    x = Mathf.Round(position.x),
-                    y = Mathf.Round(position.y),
-                    z = Mathf.Round(position.z)
-                },
-                isDisconnecting = false,
-                skillData = skillDataCache.GetDtoSnapshot(),
-                bloobColour = new ColourLike
+                ["bloobColour"] = JObject.FromObject(new ColourLike
                 {
                     a = color.a,
                     b = color.b,
                     g = color.g,
                     r = color.r
-                },
-                runSpeed = localPlayerCache.GetRunSpeed(),
-                activeHatIndex = cachedActiveHatIndex,
-                activeWingIndex = cachedActiveWingIndex,
-                cloneData = Array.Empty<string>()
+                }),
+                ["activeHatIndex"] = cachedActiveHatIndex,
+                ["activeWingIndex"] = cachedActiveWingIndex,
+                ["clanId"] = ChatSystem.Instance?.GetCurrentClanState()?.clanId,
+                ["clanName"] = ChatSystem.Instance?.GetCurrentClanState()?.name,
+                ["clanTag"] = ChatSystem.Instance?.GetCurrentClanState()?.tag,
+                ["isTurboSave"] = cachedIsTurboSave
             };
+        }
+
+        private JObject BuildSkillPayload()
+        {
+            return new JObject
+            {
+                ["skillData"] = JObject.FromObject(skillDataCache.GetDtoSnapshot()),
+                ["skillExperienceData"] = JObject.FromObject(skillDataCache.GetExperienceSnapshot()),
+                ["bossKillData"] = JObject.FromObject(bossKillCache.GetSnapshot())
+            };
+        }
+
+        private JObject BuildFullPayload()
+        {
+            var payload = new JObject
+            {
+                ["name"] = SteamClient.IsValid ? SteamClient.Name : nameCache ?? string.Empty,
+                ["steamId"] = SteamClient.IsValid ? SteamClient.SteamId.ToString() : steamIdCache ?? string.Empty,
+                ["isDisconnecting"] = false,
+                ["cloneData"] = new JArray()
+            };
+
+            foreach (var property in BuildMovementPayload().Properties())
+                payload[property.Name] = property.Value.DeepClone();
+            foreach (var property in BuildPresencePayload().Properties())
+                payload[property.Name] = property.Value.DeepClone();
+            foreach (var property in BuildSkillPayload().Properties())
+                payload[property.Name] = property.Value.DeepClone();
+
+            return payload;
+        }
+
+        private void ForceSendFullState()
+        {
+            if (!SteamClient.IsValid)
+                return;
+
+            var payload = BuildFullPayload();
+            if (ws != null && ws.IsAlive)
+                ws.Send(payload.ToString(Formatting.None));
+
+            lastPayload = payload;
+            skillDataCache.ClearDirty();
+            bossKillCache.ClearDirty();
+        }
+
+        private void SendStateDelta(JObject partialPayload, bool force = false)
+        {
+            if (partialPayload == null || !SteamClient.IsValid)
+                return;
+
+            partialPayload["name"] = SteamClient.Name;
+            partialPayload["steamId"] = SteamClient.SteamId.ToString();
+
+            var diffPayload = new JObject
+            {
+                ["name"] = partialPayload["name"],
+                ["steamId"] = partialPayload["steamId"]
+            };
+
+            foreach (var property in partialPayload.Properties())
+            {
+                if (property.Name == "name" || property.Name == "steamId")
+                    continue;
+
+                if (force || lastPayload == null || !JToken.DeepEquals(property.Value, lastPayload[property.Name]))
+                    diffPayload[property.Name] = property.Value;
+            }
+
+            if (diffPayload.Properties().Count() <= 2)
+                return;
+
+            if (ws != null && ws.IsAlive)
+                ws.Send(diffPayload.ToString(Formatting.None));
+
+            if (lastPayload == null)
+                lastPayload = BuildFullPayload();
+
+            foreach (var property in diffPayload.Properties())
+            {
+                if (property.Name == "name" || property.Name == "steamId")
+                    continue;
+
+                lastPayload[property.Name] = property.Value.DeepClone();
+            }
+
+            skillDataCache.ClearDirty();
+            bossKillCache.ClearDirty();
         }
 
         private void BeginConnectionMonitor()
@@ -757,6 +1045,8 @@ namespace Multi_bloob_adventure_idle
             if (lastPayload != null && ws != null && ws.IsAlive)
                 ws.Send(lastPayload.ToString(Formatting.None));
 
+            FlushPendingClanSkillXpBatch();
+
             isMonitoringConnection = false;
             connectionMonitorCoroutine = null;
         }
@@ -795,12 +1085,95 @@ namespace Multi_bloob_adventure_idle
             ws.Send(JsonConvert.SerializeObject(payload));
         }
 
+        public void ReportClanSkillXpAction(string skillKey, double rawSkillXpGained, bool? isTurboModeOverride = null)
+        {
+            if (string.IsNullOrWhiteSpace(skillKey))
+                return;
+
+            if (rawSkillXpGained <= 0d || double.IsNaN(rawSkillXpGained) || double.IsInfinity(rawSkillXpGained))
+                return;
+
+            var currentClanId = ChatSystem.Instance?.GetCurrentClanState()?.clanId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(currentClanId))
+                return;
+
+            bool isTurboMode = isTurboModeOverride ?? ResolveTurboSaveFlag();
+            var bucketKey = $"{skillKey}::{(isTurboMode ? "turbo" : "normal")}";
+
+            if (!string.IsNullOrWhiteSpace(pendingClanSkillXpClanId) && !string.Equals(pendingClanSkillXpClanId, currentClanId, StringComparison.Ordinal))
+            {
+                pendingClanSkillXpByBucket.Clear();
+            }
+
+            pendingClanSkillXpClanId = currentClanId;
+            pendingClanSkillXpByBucket.TryGetValue(bucketKey, out var existingAmount);
+            pendingClanSkillXpByBucket[bucketKey] = existingAmount + rawSkillXpGained;
+        }
+
+        public static void ReportLocalClanSkillXpAction(string skillKey, double rawSkillXpGained, bool? isTurboModeOverride = null)
+        {
+            instance?.ReportClanSkillXpAction(skillKey, rawSkillXpGained, isTurboModeOverride);
+        }
+
+        public void RequestClanProfile(string clanId)
+        {
+            if (string.IsNullOrWhiteSpace(clanId) || ws == null || !isConnected || !ws.IsAlive || !SteamClient.IsValid)
+                return;
+
+            var payload = new
+            {
+                type = "requestClanProfile",
+                steamId = SteamClient.SteamId.ToString(),
+                clanId
+            };
+
+            ws.Send(JsonConvert.SerializeObject(payload));
+        }
+
+        public void SendClanManagementAction(string action, object data)
+        {
+            if (string.IsNullOrWhiteSpace(action) || ws == null || !isConnected || !ws.IsAlive || !SteamClient.IsValid)
+                return;
+
+            var payload = JObject.FromObject(data ?? new { });
+            payload["type"] = "clanManage";
+            payload["action"] = action;
+            payload["steamId"] = SteamClient.SteamId.ToString();
+            ws.Send(payload.ToString(Formatting.None));
+        }
+
+        public void ReportBossKill(string bossId, int count = 1)
+        {
+            if (string.IsNullOrWhiteSpace(bossId) || count <= 0)
+                return;
+
+            bossKillCache.ReportKill(bossId, count);
+
+            var currentClanId = ChatSystem.Instance?.GetCurrentClanState()?.clanId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(currentClanId))
+                return;
+
+            if (!string.IsNullOrWhiteSpace(pendingClanBossKillClanId) && !string.Equals(pendingClanBossKillClanId, currentClanId, StringComparison.Ordinal))
+            {
+                pendingClanBossKillsByBoss.Clear();
+            }
+
+            pendingClanBossKillClanId = currentClanId;
+            pendingClanBossKillsByBoss.TryGetValue(bossId, out var existingCount);
+            pendingClanBossKillsByBoss[bossId] = existingCount + count;
+        }
+
+        public static void ReportLocalBossKill(string bossId, int count = 1)
+        {
+            instance?.ReportBossKill(bossId, count);
+        }
+
         private void HandleConfiguration()
         {
             enableLevelPanel = Config.Bind("Visual", "Enable Level Panel?", true,
                 "Toggles whether or not the skill level panel is displayed when hovering your mouse over a ghost");
-            //enableContextMenu = Config.Bind("Visual", "Enable Context Menu", true,
-            //    "Enables a context menu when you right click to display overlapping ghosts");
+            enableContextMenu = Config.Bind("Visual", "Enable Context Menu", true,
+                "Enables a context menu when you right click to display overlapping ghosts");
         }
 
         private void RefreshLocalCustomizationCache()
@@ -848,6 +1221,49 @@ namespace Multi_bloob_adventure_idle
             cachedActiveWingIndex = wingIndex;
         }
 
+        public PlayerData BuildLocalPlayerProfileSnapshot()
+        {
+            if (!SteamClient.IsValid)
+                return null;
+
+            RefreshSkillSnapshot(forceDirty: false);
+            RefreshLocalStateFlags();
+
+            return new PlayerData
+            {
+                name = SteamClient.Name,
+                steamId = SteamClient.SteamId.ToString(),
+                currentPosition = localPlayerCache.PlayerTransform != null
+                    ? new Vector3Like
+                    {
+                        x = localPlayerCache.PlayerTransform.position.x,
+                        y = localPlayerCache.PlayerTransform.position.y,
+                        z = localPlayerCache.PlayerTransform.position.z
+                    }
+                    : null,
+                runSpeed = localPlayerCache.GetRunSpeed(),
+                activeHatIndex = cachedActiveHatIndex,
+                activeWingIndex = cachedActiveWingIndex,
+                bloobColour = localPlayerCache.PlayerSpriteRenderer != null
+                    ? new ColourLike
+                    {
+                        a = localPlayerCache.PlayerSpriteRenderer.color.a,
+                        r = localPlayerCache.PlayerSpriteRenderer.color.r,
+                        g = localPlayerCache.PlayerSpriteRenderer.color.g,
+                        b = localPlayerCache.PlayerSpriteRenderer.color.b
+                    }
+                    : null,
+                skillData = skillDataCache.Clone(),
+                skillExperienceData = skillDataCache.GetExperienceSnapshot(),
+                bossKillData = bossKillCache.GetSnapshot(),
+                clanId = ChatSystem.Instance?.GetCurrentClanState()?.clanId,
+                clanName = ChatSystem.Instance?.GetCurrentClanState()?.name,
+                clanTag = ChatSystem.Instance?.GetCurrentClanState()?.tag,
+                isTurboSave = cachedIsTurboSave,
+                soulData = Array.Empty<string>()
+            };
+        }
+
         public void MainMenuClicked()
         {
             if (ghostPlayerCoroutine != null)
@@ -862,24 +1278,51 @@ namespace Multi_bloob_adventure_idle
                 positionCoroutine = null;
             }
 
+            if (presenceCoroutine != null)
+            {
+                StopCoroutine(presenceCoroutine);
+                presenceCoroutine = null;
+            }
+
             if (skillRefreshCoroutine != null)
             {
                 StopCoroutine(skillRefreshCoroutine);
                 skillRefreshCoroutine = null;
             }
 
+            if (clanSkillBatchCoroutine != null)
+            {
+                StopCoroutine(clanSkillBatchCoroutine);
+                clanSkillBatchCoroutine = null;
+            }
+
+            FlushPendingClanSkillXpBatch();
+
             isReady = false;
             localPlayerCache.Clear();
             skillDataCache.Clear();
+            bossKillCache.Clear();
 
             var hoverUi = GameObject.Find("HoverUIManager");
             var hoverDetector = GameObject.Find("HoverDetector");
+            var contextMenu = GameObject.Find("MultiplayerContextMenu");
+            var profileUi = GameObject.Find("PlayerProfileUi");
+            var clanProfileUi = GameObject.Find("ClanProfileUi");
 
             if (hoverUi)
                 Destroy(hoverUi);
 
             if (hoverDetector)
                 Destroy(hoverDetector);
+
+            if (contextMenu)
+                Destroy(contextMenu);
+
+            if (profileUi)
+                Destroy(profileUi);
+
+            if (clanProfileUi)
+                Destroy(clanProfileUi);
 
             if (ChatSystem.Instance != null)
                 Destroy(ChatSystem.Instance.gameObject);
@@ -950,7 +1393,7 @@ namespace Multi_bloob_adventure_idle
             }
 
             AddButton(settingsUi, "Enable Level Panel", enableLevelPanel, new Vector2(150, 40));
-            //AddButton(settingsUi, "Enable Context Menu", enableContextMenu, new Vector2(150, 55));
+            AddButton(settingsUi, "Enable Context Menu", enableContextMenu, new Vector2(150, 55));
         }
 
         private void AddButton(Transform parent, string labelText, ConfigEntry<bool> configEntry, Vector2 position)

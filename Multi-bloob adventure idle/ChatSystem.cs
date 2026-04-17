@@ -51,12 +51,14 @@ namespace Multi_bloob_adventure_idle
         }
 
         private readonly List<ChatUiMessage> _globalMessages = [];
+        private readonly List<ChatUiMessage> _clanMessages = [];
         private readonly List<ChatUiMessage> _systemMessages = [];
         private readonly Dictionary<string, List<ChatUiMessage>> _privateMessagesBySteamId = [];
         private readonly HashSet<string> _blockedSteamIds = [];
         private readonly HashSet<string> _unreadPrivateSteamIds = [];
         private readonly List<(string id, string label)> _unlockedTitles = [];
         private readonly List<PlayerResolutionCandidate> _pendingCandidates = [];
+        private readonly Dictionary<string, ClanStateDto> _clanProfilesById = [];
 
         private ConfigEntry<string> _blockedSteamIdsConfig;
         private ConfigEntry<string> _preferredTitleIdConfig;
@@ -72,7 +74,9 @@ namespace Multi_bloob_adventure_idle
         private string _statusLine = "";
         private float _statusUntil;
         private int _unreadGlobalCount;
+        private int _unreadClanCount;
         private int _unreadSystemCount;
+        private ClanStateDto _currentClanState;
         private bool _uiDirty = true;
 
         private const int MaxMessagesPerBucket = 250;
@@ -241,6 +245,7 @@ namespace Multi_bloob_adventure_idle
             SelectTitle("");
         }
 
+        public ChatThemeSettings Theme => _theme;
         public ChatTab CurrentTab => _ui.ActiveTab;
         public string SelectedPrivateSteamId => _selectedPrivateSteamId;
         public string StatusLine => _statusLine;
@@ -267,6 +272,7 @@ namespace Multi_bloob_adventure_idle
             return _ui.ActiveTab switch
             {
                 ChatTab.Global => _globalMessages,
+                ChatTab.Clan => _clanMessages,
                 ChatTab.System => _systemMessages,
                 ChatTab.Private => GetSelectedPrivateMessages(),
                 _ => _globalMessages
@@ -290,12 +296,80 @@ namespace Multi_bloob_adventure_idle
         }
 
         public IReadOnlyList<(string id, string label)> GetUnlockedTitles() => _unlockedTitles;
+        public ClanStateDto GetCurrentClanState() => _currentClanState;
+        public ClanStateDto GetClanProfile(string clanId)
+        {
+            if (string.IsNullOrWhiteSpace(clanId))
+                return null;
+
+            if (_currentClanState != null && _currentClanState.clanId == clanId)
+                return _currentClanState;
+
+            _clanProfilesById.TryGetValue(clanId, out var profile);
+            return profile;
+        }
+
+        public bool IsBlockedSteamId(string steamId) => IsBlocked(steamId);
+
+        public void ToggleBlockedSteamId(string steamId)
+        {
+            if (IsBlocked(steamId))
+            {
+                UnblockSteamId(steamId);
+                AddSystemLine($"Unblocked {MultiplayerPatchPlugin.GetPlayerNameFromSteamId(steamId, steamId)} locally.", ChatMessageKind.SystemRegular);
+            }
+            else
+            {
+                BlockSteamId(steamId);
+                AddSystemLine($"Blocked {MultiplayerPatchPlugin.GetPlayerNameFromSteamId(steamId, steamId)} locally.", ChatMessageKind.SystemRegular);
+            }
+
+            MarkUiDirty();
+        }
+
+        public void StartWhisperToSteamId(string steamId)
+        {
+            if (string.IsNullOrWhiteSpace(steamId))
+                return;
+
+            SelectPrivateTab(steamId);
+            FocusInput(false);
+            _ui.CurrentInputText = $"/w {steamId} ";
+            _ui.FocusInput();
+            MarkUiDirty();
+        }
+
+        public void ShowProfileForSteamId(string steamId)
+        {
+            if (string.IsNullOrWhiteSpace(steamId))
+                return;
+
+            PlayerProfileUi.Create().ShowProfile(steamId);
+        }
+
+        public void ShowClanProfile(string clanId)
+        {
+            if (string.IsNullOrWhiteSpace(clanId))
+                return;
+
+            ClanProfileUi.Create().ShowClan(clanId);
+        }
+
+        public void CopySteamIdToClipboard(string steamId)
+        {
+            if (string.IsNullOrWhiteSpace(steamId))
+                return;
+
+            GUIUtility.systemCopyBuffer = steamId;
+            AddSystemLine($"Copied SteamID for {MultiplayerPatchPlugin.GetPlayerNameFromSteamId(steamId, steamId)}.", ChatMessageKind.SystemRegular);
+        }
 
         public int GetUnreadCount(ChatTab tab)
         {
             return tab switch
             {
                 ChatTab.Global => _unreadGlobalCount,
+                ChatTab.Clan => _unreadClanCount,
                 ChatTab.System => _unreadSystemCount,
                 ChatTab.Private => _unreadPrivateSteamIds.Count,
                 _ => 0
@@ -305,7 +379,8 @@ namespace Multi_bloob_adventure_idle
         public string BuildTabLabel(ChatTab tab)
         {
             int unread = GetUnreadCount(tab);
-            return unread > 0 ? $"{tab} ({unread})" : tab.ToString();
+            string label = tab == ChatTab.Clan ? "Clan" : tab.ToString();
+            return unread > 0 ? $"{label} ({unread})" : label;
         }
 
         public void ReceiveTitleState(JObject msg)
@@ -350,10 +425,39 @@ namespace Multi_bloob_adventure_idle
             MarkUiDirty();
         }
 
+        public void ReceiveClanState(JObject msg)
+        {
+            if (msg == null)
+                return;
+
+            _currentClanState = msg["clan"]?.ToObject<ClanStateDto>();
+            if (_currentClanState != null && !string.IsNullOrWhiteSpace(_currentClanState.clanId))
+                _clanProfilesById[_currentClanState.clanId] = _currentClanState;
+            MarkUiDirty();
+        }
+
+        public void ReceiveClanProfile(JObject msg)
+        {
+            if (msg == null)
+                return;
+
+            var profile = msg["clan"]?.ToObject<ClanStateDto>();
+            if (profile == null || string.IsNullOrWhiteSpace(profile.clanId))
+                return;
+
+            _clanProfilesById[profile.clanId] = profile;
+            ClanProfileUi.Instance?.RefreshVisibleClan();
+            MarkUiDirty();
+        }
+
         public void ReceiveHistory(JArray messages)
         {
             if (messages == null)
                 return;
+
+            _globalMessages.Clear();
+            _clanMessages.Clear();
+            _systemMessages.Clear();
 
             foreach (var token in messages)
             {
@@ -370,9 +474,32 @@ namespace Multi_bloob_adventure_idle
                         token["timestampUtc"]?.ToString(),
                         false
                     );
+                    continue;
+                }
+
+                if (type == "chatMessage" && channel == "clan")
+                {
+                    ReceiveClanMessage(
+                        token["name"]?.ToString(),
+                        token["steamId"]?.ToString(),
+                        token["activeTitle"]?.ToString(),
+                        token["message"]?.ToString(),
+                        token["timestampUtc"]?.ToString(),
+                        false
+                    );
+                    continue;
+                }
+
+                if (type == "serverBroadcast")
+                {
+                    ReceiveBroadcast(token as JObject);
                 }
             }
 
+            _unreadGlobalCount = 0;
+            _unreadClanCount = 0;
+            _unreadSystemCount = 0;
+            _statusLine = "";
             MarkUiDirty();
         }
 
@@ -402,6 +529,17 @@ namespace Multi_bloob_adventure_idle
                     msg["toActiveTitle"]?.ToString(),
                     msg["message"]?.ToString(),
                     msg["timestampUtc"]?.ToString()
+                );
+            }
+            else if (channel == "clan")
+            {
+                ReceiveClanMessage(
+                    msg["name"]?.ToString(),
+                    msg["steamId"]?.ToString(),
+                    msg["activeTitle"]?.ToString(),
+                    msg["message"]?.ToString(),
+                    msg["timestampUtc"]?.ToString(),
+                    true
                 );
             }
 
@@ -468,6 +606,7 @@ namespace Multi_bloob_adventure_idle
                 ChatMessageKind.Global => $"{prefix}{displayNameWithTitle}: {msg.Message}",
                 ChatMessageKind.Private when msg.IsOutgoingPrivate => $"{prefix}[To {otherPartyWithTitle}] {msg.Message}",
                 ChatMessageKind.Private when msg.IsIncomingPrivate => $"{prefix}[From {displayNameWithTitle}] {msg.Message}",
+                ChatMessageKind.Clan => $"{prefix}[Clan] {displayNameWithTitle}: {msg.Message}",
                 ChatMessageKind.SystemRegular => $"{prefix}[SERVER] {msg.Message}",
                 ChatMessageKind.SystemImportant => $"{prefix}[IMPORTANT] {msg.Message}",
                 ChatMessageKind.SystemCritical => $"{prefix}[CRITICAL] {msg.Message}",
@@ -517,6 +656,8 @@ namespace Multi_bloob_adventure_idle
                 case "/help":
                     AddSystemLine("Available commands:", ChatMessageKind.SystemRegular);
                     AddSystemLine("/w <name|partial|steamId> <message> - Whisper a player", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/c <message> - Speak in clan chat", ChatMessageKind.SystemRegular);
+                    AddSystemLine("/clan help - Show clan command help on the server", ChatMessageKind.SystemRegular);
                     AddSystemLine("/wselect <number> - Finish a pending whisper selection", ChatMessageKind.SystemRegular);
                     AddSystemLine("/r <message> - Reply to your last whisper target", ChatMessageKind.SystemRegular);
                     AddSystemLine("/unblock <steamId> - Unblock a player locally by SteamID", ChatMessageKind.SystemRegular);
@@ -618,6 +759,31 @@ namespace Multi_bloob_adventure_idle
             ShowBubbleForPlayer(fromSteamId, fromName, text);
         }
 
+        private void ReceiveClanMessage(string fromName, string fromSteamId, string activeTitle, string text, string timestampUtc, bool showBubble)
+        {
+            if (IsBlocked(fromSteamId))
+                return;
+
+            var msg = new ChatUiMessage
+            {
+                Kind = ChatMessageKind.Clan,
+                TimestampUtc = timestampUtc,
+                DisplayName = fromName,
+                FromSteamId = fromSteamId,
+                Message = text,
+                ActiveTitle = activeTitle
+            };
+
+            AddMessage(_clanMessages, msg);
+
+            bool isFromLocalPlayer = !string.IsNullOrWhiteSpace(fromSteamId) && SteamClient.IsValid && fromSteamId == SteamClient.SteamId.ToString();
+            if (!isFromLocalPlayer)
+                MarkUnreadForIncomingMessage(ChatTab.Clan);
+
+            if (showBubble)
+                ShowBubbleForPlayer(fromSteamId, fromName, text);
+        }
+
         private void AddSystemLine(string text, ChatMessageKind kind, string timestampUtc = null)
         {
             var msg = new ChatUiMessage
@@ -656,6 +822,10 @@ namespace Multi_bloob_adventure_idle
                     if (_ui.ActiveTab != ChatTab.Global)
                         _unreadGlobalCount++;
                     break;
+                case ChatTab.Clan:
+                    if (_ui.ActiveTab != ChatTab.Clan)
+                        _unreadClanCount++;
+                    break;
                 case ChatTab.System:
                     if (_ui.ActiveTab != ChatTab.System)
                         _unreadSystemCount++;
@@ -675,6 +845,9 @@ namespace Multi_bloob_adventure_idle
             {
                 case ChatTab.Global:
                     _unreadGlobalCount = 0;
+                    break;
+                case ChatTab.Clan:
+                    _unreadClanCount = 0;
                     break;
                 case ChatTab.System:
                     _unreadSystemCount = 0;

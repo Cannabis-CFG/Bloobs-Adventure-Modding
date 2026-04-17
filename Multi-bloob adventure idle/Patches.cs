@@ -213,6 +213,57 @@ namespace Multi_bloob_adventure_idle
         }
     }
 
+    [HarmonyPatch(typeof(HomeSteadingSkill), nameof(HomeSteadingSkill.AddXP))]
+    public class HomeSteadingSkillAddXpClanPatch
+    {
+        [HarmonyPrefix]
+        private static void Prefix(HomeSteadingSkill __instance, float baseXP, out double __state)
+        {
+            __state = 0d;
+
+            if (__instance == null)
+                return;
+
+            if (baseXP <= 0f || float.IsNaN(baseXP) || float.IsInfinity(baseXP))
+                return;
+
+            __state = __instance.HomesteadingXP;
+        }
+
+        [HarmonyPostfix]
+        private static void Postfix(HomeSteadingSkill __instance, float baseXP, double __state)
+        {
+            if (__instance == null || MultiplayerPatchPlugin.instance == null)
+                return;
+
+            if (baseXP <= 0f || float.IsNaN(baseXP) || float.IsInfinity(baseXP))
+                return;
+
+            double gainedXp = __instance.HomesteadingXP - __state;
+            if (gainedXp <= 0d || double.IsNaN(gainedXp) || double.IsInfinity(gainedXp))
+                return;
+
+            MultiplayerPatchPlugin.instance.ReportClanSkillXpAction("Homesteading", gainedXp);
+        }
+    }
+
+
+    [HarmonyPatch(typeof(Tracker), nameof(Tracker.OnBossDeath))]
+    public class TrackerBossDeathPatch
+    {
+        [HarmonyPostfix]
+        private static void Postfix(string npcName)
+        {
+            if (MultiplayerPatchPlugin.instance == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(npcName))
+                return;
+
+            MultiplayerPatchPlugin.instance.ReportBossKill(npcName, 1);
+        }
+    }
+
     public class IsMultiplayerClone : MonoBehaviour
     {
         public string steamId;

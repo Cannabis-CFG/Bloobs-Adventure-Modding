@@ -9,6 +9,7 @@ namespace Multi_bloob_adventure_idle
     {
         Global,
         Private,
+        Clan,
         System
     }
 
@@ -16,6 +17,7 @@ namespace Multi_bloob_adventure_idle
     {
         Global,
         Private,
+        Clan,
         SystemRegular,
         SystemImportant,
         SystemCritical,
