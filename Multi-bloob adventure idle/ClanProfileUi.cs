@@ -114,7 +114,7 @@ namespace Multi_bloob_adventure_idle
 
             RefreshVisibleClan();
             _panel.gameObject.SetActive(true);
-            _scrollRect.verticalNormalizedPosition = 1f;
+            ForceRebuildAndScrollToTop();
         }
 
         public void RefreshVisibleClan()
@@ -454,6 +454,7 @@ namespace Multi_bloob_adventure_idle
             parent ??= _actionRoot;
             var row = UiThemeUtility.CreateRect("ActionRow", parent);
             var layout = row.gameObject.AddComponent<HorizontalLayoutGroup>();
+            layout.padding = new RectOffset(8, 8, 0, 0);
             layout.spacing = 6f;
             layout.childForceExpandWidth = false;
             layout.childForceExpandHeight = true;
@@ -541,7 +542,7 @@ namespace Multi_bloob_adventure_idle
             _panelOutline = _panel.gameObject.AddComponent<Outline>();
 
             var vertical = _panel.gameObject.AddComponent<VerticalLayoutGroup>();
-            vertical.padding = new RectOffset(8, 8, 8, 8);
+            vertical.padding = new RectOffset(18, 18, 14, 14);
             vertical.spacing = 6f;
             vertical.childForceExpandWidth = true;
             vertical.childForceExpandHeight = false;
@@ -556,6 +557,7 @@ namespace Multi_bloob_adventure_idle
             _headerText = headerTextRoot.gameObject.AddComponent<TextMeshProUGUI>();
             _headerText.alignment = TextAlignmentOptions.MidlineLeft;
             _headerText.raycastTarget = false;
+            _headerText.margin = new Vector4(12f, 0f, 12f, 0f);
             _headerText.text = "Clan Profile";
 
             _closeButton = UiThemeUtility.CreateButton("CloseButton", headerRow, out _closeButtonText, "Close", 88f, 30f);
@@ -590,13 +592,15 @@ namespace Multi_bloob_adventure_idle
 
             _content = UiThemeUtility.CreateRect("Content", viewport, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f));
             var contentLayout = _content.gameObject.AddComponent<VerticalLayoutGroup>();
-            contentLayout.padding = new RectOffset(0, 0, 0, 0);
+            contentLayout.padding = new RectOffset(18, 18, 12, 12);
             contentLayout.spacing = 8f;
             contentLayout.childForceExpandHeight = false;
             contentLayout.childForceExpandWidth = true;
 
             var contentFitter = _content.gameObject.AddComponent<ContentSizeFitter>();
             contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            _scrollRect.content = _content;
 
             var bodyRoot = UiThemeUtility.CreateRect("BodyRoot", _content);
             var bodyLE = bodyRoot.gameObject.AddComponent<LayoutElement>();
@@ -606,10 +610,11 @@ namespace Multi_bloob_adventure_idle
             _bodyText.enableWordWrapping = true;
             _bodyText.overflowMode = TextOverflowModes.Overflow;
             _bodyText.raycastTarget = false;
-            _bodyText.margin = new Vector4(6f, 6f, 6f, 6f);
+            _bodyText.margin = new Vector4(12f, 8f, 12f, 8f);
 
             _actionRoot = UiThemeUtility.CreateRect("ActionRoot", _content);
             var actionLayout = _actionRoot.gameObject.AddComponent<VerticalLayoutGroup>();
+            actionLayout.padding = new RectOffset(10, 10, 0, 0);
             actionLayout.spacing = 6f;
             actionLayout.childForceExpandHeight = false;
             actionLayout.childForceExpandWidth = true;
@@ -623,6 +628,7 @@ namespace Multi_bloob_adventure_idle
             _footerText = footerRow.gameObject.AddComponent<TextMeshProUGUI>();
             _footerText.alignment = TextAlignmentOptions.MidlineLeft;
             _footerText.raycastTarget = false;
+            _footerText.margin = new Vector4(12f, 0f, 12f, 0f);
             _footerText.text = string.Empty;
         }
 
@@ -648,6 +654,24 @@ namespace Multi_bloob_adventure_idle
             _footerText.color = _theme != null ? _theme.GetStatusTextColor() : Color.white;
         }
 
+        private void ForceRebuildAndScrollToTop()
+        {
+            if (_panel == null || _scrollRect == null)
+                return;
+
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_panel);
+            if (_scrollRect.content != null)
+                LayoutRebuilder.ForceRebuildLayoutImmediate(_scrollRect.content);
+            Canvas.ForceUpdateCanvases();
+
+            if (_scrollRect.content != null && _scrollRect.viewport != null)
+            {
+                _scrollRect.StopMovement();
+                _scrollRect.verticalNormalizedPosition = 1f;
+            }
+        }
+
         public void MoveWindow(Vector2 delta)
         {
             if (_panel == null)
@@ -665,12 +689,12 @@ namespace Multi_bloob_adventure_idle
 
             float width = _panel.sizeDelta.x * _panel.localScale.x;
             float height = _panel.sizeDelta.y * _panel.localScale.y;
-            float minX = width - Screen.width;
-            float minY = -height;
+            float maxX = Mathf.Max(0f, Screen.width - width);
+            float minY = -Mathf.Max(0f, Screen.height - height);
 
             _panel.anchoredPosition = new Vector2(
-                Mathf.Clamp(_panel.anchoredPosition.x, minX, 0f),
-                Mathf.Clamp(_panel.anchoredPosition.y, 0f, Screen.height));
+                Mathf.Clamp(_panel.anchoredPosition.x, 0f, maxX),
+                Mathf.Clamp(_panel.anchoredPosition.y, minY, 0f));
         }
 
         private void EnsureEventSystem()

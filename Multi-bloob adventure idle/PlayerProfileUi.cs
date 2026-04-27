@@ -76,7 +76,7 @@ namespace Multi_bloob_adventure_idle
             _currentSteamId = steamId;
             RefreshVisibleProfile();
             _panel.gameObject.SetActive(true);
-            _scrollRect.verticalNormalizedPosition = 1f;
+            ForceRebuildAndScrollToTop();
         }
 
         public void Hide()
@@ -236,7 +236,7 @@ namespace Multi_bloob_adventure_idle
             _panelOutline = _panel.gameObject.AddComponent<Outline>();
 
             var vertical = _panel.gameObject.AddComponent<VerticalLayoutGroup>();
-            vertical.padding = new RectOffset(8, 8, 8, 8);
+            vertical.padding = new RectOffset(16, 16, 14, 14);
             vertical.spacing = 6f;
             vertical.childForceExpandWidth = true;
             vertical.childForceExpandHeight = false;
@@ -259,6 +259,7 @@ namespace Multi_bloob_adventure_idle
             _headerText = headerTextRoot.gameObject.AddComponent<TextMeshProUGUI>();
             _headerText.alignment = TextAlignmentOptions.MidlineLeft;
             _headerText.raycastTarget = false;
+            _headerText.margin = new Vector4(12f, 0f, 12f, 0f);
             _headerText.text = "Player Profile";
 
             _viewClanButton = UiThemeUtility.CreateButton("ViewClanButton", headerRow, out _viewClanButtonText, "View Clan", 110f, 32f);
@@ -283,6 +284,12 @@ namespace Multi_bloob_adventure_idle
             _scrollRect.viewport = viewport;
 
             _content = UiThemeUtility.CreateRect("Content", viewport, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f));
+            var contentLayout = _content.gameObject.AddComponent<VerticalLayoutGroup>();
+            contentLayout.padding = new RectOffset(18, 18, 12, 12);
+            contentLayout.spacing = 0f;
+            contentLayout.childForceExpandHeight = false;
+            contentLayout.childForceExpandWidth = true;
+
             var contentFitter = _content.gameObject.AddComponent<ContentSizeFitter>();
             contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
@@ -291,8 +298,10 @@ namespace Multi_bloob_adventure_idle
             _bodyText.enableWordWrapping = true;
             _bodyText.overflowMode = TextOverflowModes.Overflow;
             _bodyText.raycastTarget = false;
-            _bodyText.margin = new Vector4(6f, 6f, 6f, 6f);
+            _bodyText.margin = new Vector4(12f, 8f, 12f, 8f);
             _bodyText.text = string.Empty;
+
+            _scrollRect.content = _content;
 
             var footerRow = UiThemeUtility.CreateRect("FooterRow", _panel);
             var footerLE = footerRow.gameObject.AddComponent<LayoutElement>();
@@ -301,6 +310,7 @@ namespace Multi_bloob_adventure_idle
             _footerText = footerRow.gameObject.AddComponent<TextMeshProUGUI>();
             _footerText.alignment = TextAlignmentOptions.MidlineLeft;
             _footerText.raycastTarget = false;
+            _footerText.margin = new Vector4(12f, 0f, 12f, 0f);
             _footerText.text = string.Empty;
         }
 
@@ -333,6 +343,24 @@ namespace Multi_bloob_adventure_idle
             ClampToScreen();
         }
 
+        private void ForceRebuildAndScrollToTop()
+        {
+            if (_panel == null || _scrollRect == null)
+                return;
+
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_panel);
+            if (_scrollRect.content != null)
+                LayoutRebuilder.ForceRebuildLayoutImmediate(_scrollRect.content);
+            Canvas.ForceUpdateCanvases();
+
+            if (_scrollRect.content != null && _scrollRect.viewport != null)
+            {
+                _scrollRect.StopMovement();
+                _scrollRect.verticalNormalizedPosition = 1f;
+            }
+        }
+
         private void ClampToScreen()
         {
             if (_panel == null)
@@ -340,12 +368,12 @@ namespace Multi_bloob_adventure_idle
 
             float width = _panel.sizeDelta.x * _panel.localScale.x;
             float height = _panel.sizeDelta.y * _panel.localScale.y;
-            float minX = width - Screen.width;
-            float minY = -height;
+            float maxX = Mathf.Max(0f, Screen.width - width);
+            float minY = -Mathf.Max(0f, Screen.height - height);
 
             _panel.anchoredPosition = new Vector2(
-                Mathf.Clamp(_panel.anchoredPosition.x, minX, 0f),
-                Mathf.Clamp(_panel.anchoredPosition.y, 0f, Screen.height));
+                Mathf.Clamp(_panel.anchoredPosition.x, 0f, maxX),
+                Mathf.Clamp(_panel.anchoredPosition.y, minY, 0f));
         }
 
         private void EnsureEventSystem()

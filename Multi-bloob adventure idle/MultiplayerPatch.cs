@@ -41,8 +41,12 @@ namespace Multi_bloob_adventure_idle
 
         private readonly Dictionary<string, double> pendingClanSkillXpByBucket = new(StringComparer.Ordinal);
         private string pendingClanSkillXpClanId = string.Empty;
-        private readonly Dictionary<string, long> pendingClanBossKillsByBoss = new(StringComparer.OrdinalIgnoreCase);
-        private string pendingClanBossKillClanId = string.Empty;
+
+        private bool hasLastMovementSnapshot;
+        private float lastMovementX;
+        private float lastMovementY;
+        private float lastMovementZ;
+        private float lastMovementRunSpeed;
 
         public static bool isReady;
         private bool nameTagCreated;
@@ -59,7 +63,7 @@ namespace Multi_bloob_adventure_idle
 
         public static readonly Dictionary<string, PlayerData> Players = [];
 
-        private const string WebSocketUrl = "ws://172.93.111.163:42069";
+        private const string WebSocketUrl = "ws://172.93.111.163:42067";
         private const float PositionSendIntervalSeconds = 0.2f;
         private const float PresenceSendIntervalSeconds = 1f;
         private const float GhostRefreshIntervalSeconds = 1f;
@@ -95,7 +99,6 @@ namespace Multi_bloob_adventure_idle
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeHideHatPatch));
             Harmony.CreateAndPatchAll(typeof(BloobColourChangeHideWingsPatch));
             Harmony.CreateAndPatchAll(typeof(HomeSteadingSkillAddXpClanPatch));
-            Harmony.CreateAndPatchAll(typeof(TrackerBossDeathPatch));
         }
 
         private void InitializeWebSocket()
@@ -404,14 +407,13 @@ namespace Multi_bloob_adventure_idle
             PlayerProfileUi.Create();
             ClanProfileUi.Create();
             ModUpdateManager.Create(Config, Info.Metadata.Version.ToString(), Info.Location);
-            PlayerDataManager playerDataManager = GameObject.Find("PlayerDataManager")?.GetComponent<PlayerDataManager>();
-            playerDataManager?.SetModded(true);
 
             TryResolveLocalPlayer(forceRefresh: true);
             RefreshSkillSnapshot(forceDirty: true);
             RefreshLocalCustomizationCache();
             RefreshLocalStateFlags();
             ForceSendFullState();
+            CacheCurrentMovementSnapshot();
 
             ghostPlayerCoroutine ??= StartCoroutine(UpdateGhostPlayers());
             skillRefreshCoroutine ??= StartCoroutine(RefreshSkillDataEnumerator());
@@ -675,7 +677,24 @@ namespace Multi_bloob_adventure_idle
                     continue;
                 }
 
-                SendStateDelta(BuildMovementPayload());
+                if (!TryGetRoundedMovementState(out var roundedX, out var roundedY, out var roundedZ, out var roundedRunSpeed))
+                {
+                    yield return new WaitForSecondsRealtime(PositionSendIntervalSeconds);
+                    continue;
+                }
+
+                if (hasLastMovementSnapshot &&
+                    Mathf.Approximately(roundedX, lastMovementX) &&
+                    Mathf.Approximately(roundedY, lastMovementY) &&
+                    Mathf.Approximately(roundedZ, lastMovementZ) &&
+                    Mathf.Approximately(roundedRunSpeed, lastMovementRunSpeed))
+                {
+                    yield return new WaitForSecondsRealtime(PositionSendIntervalSeconds);
+                    continue;
+                }
+
+                SendStateDelta(BuildMovementPayload(roundedX, roundedY, roundedZ, roundedRunSpeed));
+                CacheMovementSnapshot(roundedX, roundedY, roundedZ, roundedRunSpeed);
                 yield return new WaitForSecondsRealtime(PositionSendIntervalSeconds);
             }
         }
@@ -720,123 +739,142 @@ namespace Multi_bloob_adventure_idle
 
         private void FlushPendingClanSkillXpBatch(bool discardIfClanChanged = true)
         {
+            if (pendingClanSkillXpByBucket.Count <= 0)
+                return;
+
             var currentClanId = ChatSystem.Instance?.GetCurrentClanState()?.clanId ?? string.Empty;
             if (string.IsNullOrWhiteSpace(currentClanId))
             {
                 pendingClanSkillXpByBucket.Clear();
                 pendingClanSkillXpClanId = string.Empty;
-                pendingClanBossKillsByBoss.Clear();
-                pendingClanBossKillClanId = string.Empty;
                 return;
             }
 
-            if (discardIfClanChanged)
+            if (discardIfClanChanged && !string.IsNullOrWhiteSpace(pendingClanSkillXpClanId) && !string.Equals(pendingClanSkillXpClanId, currentClanId, StringComparison.Ordinal))
             {
-                if (!string.IsNullOrWhiteSpace(pendingClanSkillXpClanId) && !string.Equals(pendingClanSkillXpClanId, currentClanId, StringComparison.Ordinal))
-                {
-                    pendingClanSkillXpByBucket.Clear();
-                    pendingClanSkillXpClanId = string.Empty;
-                }
-
-                if (!string.IsNullOrWhiteSpace(pendingClanBossKillClanId) && !string.Equals(pendingClanBossKillClanId, currentClanId, StringComparison.Ordinal))
-                {
-                    pendingClanBossKillsByBoss.Clear();
-                    pendingClanBossKillClanId = string.Empty;
-                }
+                pendingClanSkillXpByBucket.Clear();
+                pendingClanSkillXpClanId = string.Empty;
+                return;
             }
 
             if (ws == null || !isConnected || !ws.IsAlive || !SteamClient.IsValid)
                 return;
 
-            if (pendingClanSkillXpByBucket.Count > 0)
+            var entries = new JArray();
+            foreach (var kvp in pendingClanSkillXpByBucket)
             {
-                var entries = new JArray();
-                foreach (var kvp in pendingClanSkillXpByBucket)
+                if (kvp.Value <= 0d || double.IsNaN(kvp.Value) || double.IsInfinity(kvp.Value))
+                    continue;
+
+                var separatorIndex = kvp.Key.LastIndexOf("::", StringComparison.Ordinal);
+                if (separatorIndex <= 0)
+                    continue;
+
+                var skillKey = kvp.Key.Substring(0, separatorIndex);
+                var modeKey = kvp.Key.Substring(separatorIndex + 2);
+                var isTurboMode = string.Equals(modeKey, "turbo", StringComparison.Ordinal);
+
+                entries.Add(new JObject
                 {
-                    if (kvp.Value <= 0d || double.IsNaN(kvp.Value) || double.IsInfinity(kvp.Value))
-                        continue;
+                    ["skillKey"] = skillKey,
+                    ["rawSkillXpGained"] = Math.Round(kvp.Value, 4, MidpointRounding.AwayFromZero),
+                    ["isTurboMode"] = isTurboMode
+                });
+            }
 
-                    var separatorIndex = kvp.Key.LastIndexOf("::", StringComparison.Ordinal);
-                    if (separatorIndex <= 0)
-                        continue;
-
-                    var skillKey = kvp.Key.Substring(0, separatorIndex);
-                    var modeKey = kvp.Key.Substring(separatorIndex + 2);
-                    var isTurboMode = string.Equals(modeKey, "turbo", StringComparison.Ordinal);
-
-                    entries.Add(new JObject
-                    {
-                        ["skillKey"] = skillKey,
-                        ["rawSkillXpGained"] = Math.Round(kvp.Value, 4, MidpointRounding.AwayFromZero),
-                        ["isTurboMode"] = isTurboMode
-                    });
-                }
-
-                if (entries.Count > 0)
-                {
-                    var payload = new JObject
-                    {
-                        ["type"] = "clanSkillXpBatchAction",
-                        ["steamId"] = SteamClient.SteamId.ToString(),
-                        ["name"] = SteamClient.Name,
-                        ["entries"] = entries,
-                        ["timestampUtc"] = DateTime.UtcNow.ToString("O")
-                    };
-
-                    ws.Send(payload.ToString(Formatting.None));
-                }
-
+            if (entries.Count <= 0)
+            {
                 pendingClanSkillXpByBucket.Clear();
                 pendingClanSkillXpClanId = currentClanId;
+                return;
             }
 
-            if (pendingClanBossKillsByBoss.Count > 0)
+            var payload = new JObject
             {
-                var entries = new JArray();
-                foreach (var kvp in pendingClanBossKillsByBoss)
-                {
-                    if (string.IsNullOrWhiteSpace(kvp.Key) || kvp.Value <= 0)
-                        continue;
+                ["type"] = "clanSkillXpBatchAction",
+                ["steamId"] = SteamClient.SteamId.ToString(),
+                ["name"] = SteamClient.Name,
+                ["entries"] = entries,
+                ["timestampUtc"] = DateTime.UtcNow.ToString("O")
+            };
 
-                    entries.Add(new JObject
-                    {
-                        ["bossId"] = kvp.Key,
-                        ["count"] = kvp.Value
-                    });
-                }
-
-                if (entries.Count > 0)
-                {
-                    var payload = new JObject
-                    {
-                        ["type"] = "clanBossKillBatchAction",
-                        ["steamId"] = SteamClient.SteamId.ToString(),
-                        ["name"] = SteamClient.Name,
-                        ["entries"] = entries,
-                        ["timestampUtc"] = DateTime.UtcNow.ToString("O")
-                    };
-
-                    ws.Send(payload.ToString(Formatting.None));
-                }
-
-                pendingClanBossKillsByBoss.Clear();
-                pendingClanBossKillClanId = currentClanId;
-            }
+            ws.Send(payload.ToString(Formatting.None));
+            pendingClanSkillXpByBucket.Clear();
+            pendingClanSkillXpClanId = currentClanId;
         }
 
         private JObject BuildMovementPayload()
         {
-            var position = localPlayerCache.PlayerTransform != null ? localPlayerCache.PlayerTransform.position : Vector3.zero;
+            if (!TryGetRoundedMovementState(out var roundedX, out var roundedY, out var roundedZ, out var roundedRunSpeed))
+            {
+                roundedX = 0f;
+                roundedY = 0f;
+                roundedZ = 0f;
+                roundedRunSpeed = 0f;
+            }
+
+            return BuildMovementPayload(roundedX, roundedY, roundedZ, roundedRunSpeed);
+        }
+
+        private JObject BuildMovementPayload(float roundedX, float roundedY, float roundedZ, float roundedRunSpeed)
+        {
             return new JObject
             {
                 ["currentPosition"] = JObject.FromObject(new Vector3Like
                 {
-                    x = (float)Math.Round(position.x, 2),
-                    y = (float)Math.Round(position.y, 2),
-                    z = (float)Math.Round(position.z, 2)
+                    x = roundedX,
+                    y = roundedY,
+                    z = roundedZ
                 }),
-                ["runSpeed"] = localPlayerCache.GetRunSpeed()
+                ["runSpeed"] = roundedRunSpeed
             };
+        }
+
+        private bool TryGetRoundedMovementState(out float roundedX, out float roundedY, out float roundedZ, out float roundedRunSpeed)
+        {
+            roundedX = 0f;
+            roundedY = 0f;
+            roundedZ = 0f;
+            roundedRunSpeed = 0f;
+
+            if (localPlayerCache.PlayerTransform == null)
+                return false;
+
+            var position = localPlayerCache.PlayerTransform.position;
+            roundedX = (float)Math.Round(position.x, 2, MidpointRounding.AwayFromZero);
+            roundedY = (float)Math.Round(position.y, 2, MidpointRounding.AwayFromZero);
+            roundedZ = (float)Math.Round(position.z, 2, MidpointRounding.AwayFromZero);
+            roundedRunSpeed = (float)Math.Round(localPlayerCache.GetRunSpeed(), 3, MidpointRounding.AwayFromZero);
+            return true;
+        }
+
+        private void CacheCurrentMovementSnapshot()
+        {
+            if (!TryGetRoundedMovementState(out var roundedX, out var roundedY, out var roundedZ, out var roundedRunSpeed))
+            {
+                ClearMovementSnapshot();
+                return;
+            }
+
+            CacheMovementSnapshot(roundedX, roundedY, roundedZ, roundedRunSpeed);
+        }
+
+        private void CacheMovementSnapshot(float roundedX, float roundedY, float roundedZ, float roundedRunSpeed)
+        {
+            hasLastMovementSnapshot = true;
+            lastMovementX = roundedX;
+            lastMovementY = roundedY;
+            lastMovementZ = roundedZ;
+            lastMovementRunSpeed = roundedRunSpeed;
+        }
+
+        private void ClearMovementSnapshot()
+        {
+            hasLastMovementSnapshot = false;
+            lastMovementX = 0f;
+            lastMovementY = 0f;
+            lastMovementZ = 0f;
+            lastMovementRunSpeed = 0f;
         }
 
         private JObject BuildPresencePayload()
@@ -903,6 +941,7 @@ namespace Multi_bloob_adventure_idle
                 ws.Send(payload.ToString(Formatting.None));
 
             lastPayload = payload;
+            CacheCurrentMovementSnapshot();
             skillDataCache.ClearDirty();
             bossKillCache.ClearDirty();
         }
@@ -1146,23 +1185,7 @@ namespace Multi_bloob_adventure_idle
 
         public void ReportBossKill(string bossId, int count = 1)
         {
-            if (string.IsNullOrWhiteSpace(bossId) || count <= 0)
-                return;
-
             bossKillCache.ReportKill(bossId, count);
-
-            var currentClanId = ChatSystem.Instance?.GetCurrentClanState()?.clanId ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(currentClanId))
-                return;
-
-            if (!string.IsNullOrWhiteSpace(pendingClanBossKillClanId) && !string.Equals(pendingClanBossKillClanId, currentClanId, StringComparison.Ordinal))
-            {
-                pendingClanBossKillsByBoss.Clear();
-            }
-
-            pendingClanBossKillClanId = currentClanId;
-            pendingClanBossKillsByBoss.TryGetValue(bossId, out var existingCount);
-            pendingClanBossKillsByBoss[bossId] = existingCount + count;
         }
 
         public static void ReportLocalBossKill(string bossId, int count = 1)
@@ -1304,6 +1327,7 @@ namespace Multi_bloob_adventure_idle
             localPlayerCache.Clear();
             skillDataCache.Clear();
             bossKillCache.Clear();
+            ClearMovementSnapshot();
 
             var hoverUi = GameObject.Find("HoverUIManager");
             var hoverDetector = GameObject.Find("HoverDetector");
